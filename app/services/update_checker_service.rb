@@ -16,24 +16,33 @@ class UpdateCheckerService
   class << self
     # Check for updates (cached)
     def check(force: false)
-      Rails.cache.delete(CACHE_KEY) if force
+      version = current_version
+      cache_key = cache_key_for(version)
 
-      Rails.cache.fetch(CACHE_KEY, expires_in: CACHE_TTL) do
+      Rails.cache.delete(cache_key) if force
+
+      Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
         perform_check
       end
     end
 
     # Get cached result without making API call
     def cached_result
-      Rails.cache.read(CACHE_KEY)
+      Rails.cache.read(cache_key_for(current_version))
     end
 
     # Clear cache
     def clear_cache
+      Rails.cache.delete(cache_key_for(current_version))
       Rails.cache.delete(CACHE_KEY)
     end
 
     private
+
+    def cache_key_for(version)
+      suffix = version.presence || "unknown"
+      "#{CACHE_KEY}:#{suffix}"
+    end
 
     def perform_check
       current = current_version

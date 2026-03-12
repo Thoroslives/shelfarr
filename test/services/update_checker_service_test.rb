@@ -162,6 +162,54 @@ class UpdateCheckerServiceTest < ActiveSupport::TestCase
     Rails.cache = original_cache
   end
 
+  test "does not reuse cached result from a previous app version" do
+    original_cache = Rails.cache
+    Rails.cache = ActiveSupport::Cache::MemoryStore.new
+
+    VCR.turned_off do
+      stub_github_release("0.5.1")
+
+      UpdateCheckerService.stub(:current_version, "0.5.0") do
+        stale_result = UpdateCheckerService.check(force: true)
+
+        assert stale_result.update_available?
+        assert_equal "0.5.0", stale_result.current_version
+      end
+
+      UpdateCheckerService.stub(:current_version, "0.5.1") do
+        fresh_result = UpdateCheckerService.check
+
+        assert_not fresh_result.update_available?
+        assert_equal "0.5.1", fresh_result.current_version
+        assert_equal "0.5.1", fresh_result.latest_version
+      end
+    end
+  ensure
+    Rails.cache = original_cache
+  end
+
+  test "cached_result ignores entries from older app versions" do
+    original_cache = Rails.cache
+    Rails.cache = ActiveSupport::Cache::MemoryStore.new
+
+    stale_result = UpdateCheckerService::Result.new(
+      update_available: true,
+      current_version: "0.5.0",
+      latest_version: "0.5.1",
+      latest_message: "v0.5.1",
+      latest_date: Time.parse("2026-02-28T18:53:10Z"),
+      release_url: "https://github.com/Pedro-Revez-Silva/shelfarr/releases/tag/v0.5.1"
+    )
+
+    Rails.cache.write(UpdateCheckerService.send(:cache_key_for, "0.5.0"), stale_result)
+
+    UpdateCheckerService.stub(:current_version, "0.5.1") do
+      assert_nil UpdateCheckerService.cached_result
+    end
+  ensure
+    Rails.cache = original_cache
+  end
+
   test "reads version from VERSION file" do
     result = UpdateCheckerService.send(:current_version)
     assert_equal "0.1.0", result
