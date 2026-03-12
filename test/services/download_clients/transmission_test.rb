@@ -4,6 +4,7 @@ require "test_helper"
 
 class DownloadClients::TransmissionTest < ActiveSupport::TestCase
   setup do
+    DownloadClient.destroy_all
     @client_record = DownloadClient.create!(
       name: "Test Transmission",
       client_type: "transmission",
@@ -29,7 +30,12 @@ class DownloadClients::TransmissionTest < ActiveSupport::TestCase
           body: { "result" => "success", "arguments" => { "torrents" => [ { "hashString" => "existing" } ] } }.to_json
         )
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"torrent-add"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["method"] == "torrent-add" &&
+            body["arguments"] == { "filename" => "magnet:?xt=urn:btih:abcdef" } &&
+            !body["arguments"].key?("args")
+        end
         .to_return(
           status: 200,
           headers: { "Content-Type" => "application/json" },
@@ -37,6 +43,38 @@ class DownloadClients::TransmissionTest < ActiveSupport::TestCase
         )
 
       result = @client.add_torrent("magnet:?xt=urn:btih:abcdef")
+      assert_equal "new-torrent-id", result
+    end
+  end
+
+  test "add_torrent uses canonical Transmission argument keys" do
+    VCR.turned_off do
+      stub_session_handshake("http://localhost:9091/transmission/rpc")
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"torrent-get"/)
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: { "result" => "success", "arguments" => { "torrents" => [] } }.to_json
+        )
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["method"] == "torrent-add" &&
+            body["arguments"] == {
+              "filename" => "http://example.com/download/test.torrent",
+              "paused" => true,
+              "download_dir" => "/downloads/books"
+            } &&
+            !body["arguments"].key?("download-dir")
+        end
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: { "result" => "success", "arguments" => { "torrent-added" => { "hashString" => "new-torrent-id" } } }.to_json
+        )
+
+      result = @client.add_torrent("http://example.com/download/test.torrent", paused: true, save_path: "/downloads/books")
       assert_equal "new-torrent-id", result
     end
   end
@@ -122,11 +160,53 @@ class DownloadClients::TransmissionTest < ActiveSupport::TestCase
     end
   end
 
+  test "torrent_info maps local errors to failed state" do
+    VCR.turned_off do
+      stub_session_handshake("http://localhost:9091/transmission/rpc")
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"torrent-get"/)
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: {
+            "result" => "success",
+            "arguments" => {
+              "torrents" => [
+                {
+                  "hashString" => "abc123",
+                  "name" => "Broken Transmission Book",
+                  "percentDone" => 0.2,
+                  "status" => 4,
+                  "error" => 3,
+                  "errorString" => "Permission denied",
+                  "totalSize" => 1073741824,
+                  "downloadDir" => "/downloads/Broken Transmission Book"
+                }
+              ]
+            }
+          }.to_json
+        )
+
+      info = @client.torrent_info("abc123")
+
+      assert_equal :failed, info.state
+      assert info.failed?
+    end
+  end
+
   test "remove_torrent returns true on success" do
     VCR.turned_off do
       stub_session_handshake("http://localhost:9091/transmission/rpc")
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"torrent-remove"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["method"] == "torrent-remove" &&
+            body["arguments"] == {
+              "ids" => [ "abc123" ],
+              "delete_local_data" => true
+            } &&
+            !body["arguments"].key?("delete-local-data")
+        end
         .to_return(
           status: 200,
           headers: { "Content-Type" => "application/json" },
@@ -152,6 +232,17 @@ class DownloadClients::TransmissionTest < ActiveSupport::TestCase
   end
 
   test "test_connection returns true on success" do
+    VCR.turned_off do
+      stub_session_handshake("http://localhost:9091/transmission/rpc")
+
+      assert @client.test_connection
+    end
+  end
+
+  test "test_connection uses rpc path when configured url is host root" do
+    @client_record.update!(url: "http://localhost:9091")
+    @client = @client_record.adapter
+
     VCR.turned_off do
       stub_session_handshake("http://localhost:9091/transmission/rpc")
 

@@ -4,6 +4,7 @@ require "test_helper"
 
 class DownloadClientSelectorTest < ActiveSupport::TestCase
   setup do
+    DownloadClient.destroy_all
     Thread.current[:qbittorrent_sessions] = {}
     Thread.current[:deluge_sessions] = {}
     Thread.current[:transmission_sessions] = {}

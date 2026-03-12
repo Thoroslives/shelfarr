@@ -4,6 +4,7 @@ require "test_helper"
 
 class DownloadMonitorJobTest < ActiveJob::TestCase
   setup do
+    DownloadClient.destroy_all
     @request = requests(:pending_request)
 
     # Create a qBittorrent client
@@ -127,6 +128,71 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
     VCR.turned_off do
       stub_qbittorrent_auth
       stub_qbittorrent_torrent_info(progress: 0, state: "error")
+
+      DownloadMonitorJob.perform_now
+      @download.reload
+      @request.reload
+
+      assert @download.failed?
+      assert @request.attention_needed?
+      assert_includes @request.issue_description, "failed in client"
+    end
+  end
+
+  test "marks transmission download as failed when client reports local error" do
+    transmission = DownloadClient.create!(
+      name: "Test Transmission",
+      client_type: "transmission",
+      url: "http://localhost:9091",
+      username: "admin",
+      password: "adminadmin",
+      priority: 0,
+      enabled: true
+    )
+    Thread.current[:transmission_sessions] = {}
+    @download.update!(
+      external_id: "transmission-hash",
+      download_client: transmission
+    )
+
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"session-get"/)
+        .to_return(
+          {
+            status: 409,
+            headers: { "x-transmission-session-id" => "session-id" },
+            body: { "result" => "session", "arguments" => {} }.to_json
+          },
+          {
+            status: 200,
+            headers: { "Content-Type" => "application/json" },
+            body: { "result" => "success", "arguments" => {} }.to_json
+          }
+        )
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"torrent-get"/)
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: {
+            "result" => "success",
+            "arguments" => {
+              "torrents" => [
+                {
+                  "hashString" => "transmission-hash",
+                  "name" => "Test Audiobook",
+                  "percentDone" => 0.0,
+                  "status" => 4,
+                  "error" => 3,
+                  "errorString" => "Permission denied",
+                  "totalSize" => 1073741824,
+                  "downloadDir" => "/downloads/complete/Test Audiobook"
+                }
+              ]
+            }
+          }.to_json
+        )
 
       DownloadMonitorJob.perform_now
       @download.reload

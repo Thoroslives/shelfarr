@@ -6,6 +6,7 @@ require "digest/sha1"
 
 class DownloadJobTest < ActiveJob::TestCase
   setup do
+    DownloadClient.destroy_all
     @request = requests(:pending_request)
     @selected_result = search_results(:selected_result)
 
@@ -94,6 +95,63 @@ class DownloadJobTest < ActiveJob::TestCase
 
     # Status should not change
     assert @download.downloading?
+  end
+
+  test "uses transmission client for torrent downloads" do
+    @client.destroy!
+    transmission = DownloadClient.create!(
+      name: "Test Transmission",
+      client_type: "transmission",
+      url: "http://localhost:9091",
+      username: "admin",
+      password: "adminadmin",
+      priority: 0,
+      enabled: true
+    )
+    Thread.current[:transmission_sessions] = {}
+
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"session-get"/)
+        .to_return(
+          {
+            status: 409,
+            headers: { "x-transmission-session-id" => "session-id" },
+            body: { "result" => "session", "arguments" => {} }.to_json
+          },
+          {
+            status: 200,
+            headers: { "Content-Type" => "application/json" },
+            body: { "result" => "success", "arguments" => {} }.to_json
+          }
+        )
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with(body: /"method"\s*:\s*"torrent-get"/)
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: { "result" => "success", "arguments" => { "torrents" => [] } }.to_json
+        )
+      stub_request(:post, "http://localhost:9091/transmission/rpc")
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["method"] == "torrent-add" &&
+            body["arguments"]["filename"] == "http://example.com/download/test.torrent"
+        end
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: { "result" => "success", "arguments" => { "torrent-added" => { "hashString" => "transmission-hash" } } }.to_json
+        )
+
+      DownloadJob.perform_now(@download.id)
+      @download.reload
+
+      assert @download.downloading?
+      assert_equal transmission.id.to_s, @download.download_client_id
+      assert_equal "transmission-hash", @download.external_id
+      assert_equal "torrent", @download.download_type
+    end
   end
 
   test "skips non-existent downloads" do

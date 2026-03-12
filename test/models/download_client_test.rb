@@ -3,6 +3,10 @@
 require "test_helper"
 
 class DownloadClientTest < ActiveSupport::TestCase
+  setup do
+    DownloadClient.destroy_all
+  end
+
   test "validates presence of name" do
     client = DownloadClient.new(client_type: "qbittorrent", url: "http://localhost:8080")
     assert_not client.valid?

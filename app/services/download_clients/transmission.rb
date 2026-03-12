@@ -23,9 +23,9 @@ module DownloadClients
         filename: url
       }
       args[:paused] = options[:paused] unless options[:paused].nil?
-      args["download-dir"] = options[:save_path] if options[:save_path].present?
+      args[:download_dir] = options[:save_path] if options[:save_path].present?
 
-      response = rpc_request("torrent-add", args: args)
+      response = rpc_request("torrent-add", args)
       added = response.dig("torrent-added", "hashString")
       duplicate = response.dig("torrent-duplicate", "hashString")
 
@@ -73,7 +73,7 @@ module DownloadClients
     def remove_torrent(hash, delete_files: false)
       ensure_authenticated!
 
-      response = rpc_request("torrent-remove", ids: [hash], "delete-local-data": delete_files)
+      response = rpc_request("torrent-remove", ids: [hash], delete_local_data: delete_files)
       !response.nil?
     rescue Faraday::Error => e
       raise Base::ConnectionError, "Failed to connect to Transmission: #{e.message}"
@@ -167,7 +167,7 @@ module DownloadClients
         hash: data["hashString"],
         name: data["name"],
         progress: normalize_progress(data["percentDone"]),
-        state: normalize_state(data["status"]),
+        state: normalize_state(data["status"], error: data["error"]),
         size_bytes: data["totalSize"],
         download_path: data["downloadDir"].to_s
       )
@@ -178,7 +178,9 @@ module DownloadClients
       (progress.to_f * 100).round
     end
 
-    def normalize_state(status)
+    def normalize_state(status, error: nil)
+      return :failed if error.to_i == 3
+
       case status.to_i
       when 0
         :paused
@@ -198,7 +200,7 @@ module DownloadClients
     end
 
     def connection
-      Faraday.new(url: base_url) do |f|
+      Faraday.new(url: rpc_url) do |f|
         f.request :json
         if config.username.present? || config.password.present?
           f.request :authorization, :basic, config.username.to_s, config.password.to_s
@@ -212,6 +214,21 @@ module DownloadClients
 
     def session_id
       Thread.current[:transmission_sessions]&.[](config.id)
+    end
+
+    def rpc_url
+      uri = URI.parse(base_url)
+      path = uri.path.to_s
+
+      if path.blank? || path == "/"
+        uri.path = "/transmission/rpc"
+      elsif path.end_with?("/transmission/rpc/")
+        uri.path = path.delete_suffix("/")
+      end
+
+      uri.to_s
+    rescue URI::InvalidURIError
+      base_url
     end
   end
 end
