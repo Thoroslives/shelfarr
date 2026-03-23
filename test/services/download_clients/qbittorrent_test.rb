@@ -147,6 +147,46 @@ class DownloadClients::QbittorrentTest < ActiveSupport::TestCase
     end
   end
 
+  test "list_torrents normalizes qBittorrent v5 stopped states" do
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:8080/api/v2/auth/login")
+        .to_return(
+          status: 200,
+          headers: { "Set-Cookie" => "SID=test_session_id; path=/" },
+          body: "Ok."
+        )
+
+      stub_request(:get, "http://localhost:8080/api/v2/torrents/info")
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: [
+            {
+              "hash" => "stopped-up-hash",
+              "name" => "Stopped Upload",
+              "progress" => 1.0,
+              "state" => "stoppedUP",
+              "size" => 1073741824,
+              "content_path" => "/downloads/Stopped Upload"
+            },
+            {
+              "hash" => "stopped-down-hash",
+              "name" => "Stopped Download",
+              "progress" => 0.42,
+              "state" => "stoppedDL",
+              "size" => 1073741824,
+              "content_path" => "/downloads/Stopped Download"
+            }
+          ].to_json
+        )
+
+      torrents = @client.list_torrents.index_by(&:hash)
+
+      assert_equal :completed, torrents.fetch("stopped-up-hash").state
+      assert_equal :paused, torrents.fetch("stopped-down-hash").state
+    end
+  end
+
   test "test_connection returns true when successful" do
     VCR.turned_off do
       stub_request(:post, "http://localhost:8080/api/v2/auth/login")
