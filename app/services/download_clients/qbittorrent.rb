@@ -27,7 +27,7 @@ module DownloadClients
       response = if torrent_data.present?
         upload_torrent_file(torrent_data, options)
       else
-        params = { urls: submit_url }
+        params = { urls: submit_url, sequentialDownload: "true" }
         params[:category] = config.category if config.category.present?
         params[:savepath] = options[:save_path] if options[:save_path].present?
         params[:paused] = options[:paused] ? "true" : "false" if options.key?(:paused)
@@ -380,6 +380,7 @@ module DownloadClients
           "torrent.torrent"
         )
       }
+      payload[:sequentialDownload] = "true"
       payload[:category] = config.category if config.category.present?
       payload[:savepath] = options[:save_path] if options[:save_path].present?
       payload[:paused] = options[:paused] ? "true" : "false" if options.key?(:paused)
@@ -438,7 +439,7 @@ module DownloadClients
       if auth_response.status == 200 && auth_response.body == "Ok."
         # Extract SID cookie from response
         cookie = auth_response.headers["set-cookie"]
-        match = cookie&.match(/SID=([^;]+)/)
+        match = cookie&.match(/(?:SID|sid)=([^;]+)/)
         if match
           session_key[:sid] = match[1]
           Rails.logger.info "[Qbittorrent] Authenticated successfully to #{config.name}"
