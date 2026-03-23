@@ -223,6 +223,38 @@ module Admin
       respond_with_flash(alert: "OIDC test error: #{e.message}")
     end
 
+    def test_webhook
+      unless SettingsService.get(:webhook_enabled, default: false)
+        respond_with_flash(alert: "Webhooks are not enabled.")
+        return
+      end
+
+      url = SettingsService.get(:webhook_url)
+      if url.blank?
+        respond_with_flash(alert: "Webhook URL is not configured.")
+        return
+      end
+
+      token = SettingsService.get(:webhook_token)
+      headers = { "Content-Type" => "text/plain", "Title" => "Shelfarr Test" }
+      if token.present?
+        headers["Authorization"] = token.start_with?("Bearer ") ? token : "Bearer #{token}"
+      end
+
+      conn = Faraday.new { |f| f.options.timeout = 10; f.options.open_timeout = 5 }
+      response = conn.post(url) { |req| req.headers = headers; req.body = "Test notification from Shelfarr" }
+
+      if response.success?
+        respond_with_flash(notice: "Webhook test sent successfully!")
+      else
+        respond_with_flash(alert: "Webhook returned HTTP #{response.status}: #{response.body.to_s.truncate(100)}")
+      end
+    rescue Faraday::ConnectionFailed, Faraday::TimeoutError => e
+      respond_with_flash(alert: "Webhook connection failed: #{e.message}")
+    rescue StandardError => e
+      respond_with_flash(alert: "Webhook test error: #{e.message}")
+    end
+
     private
 
     def respond_with_flash(notice: nil, alert: nil)
