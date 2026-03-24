@@ -127,6 +127,42 @@ class RequestsControllerTest < ActionDispatch::IntegrationTest
     assert_select "h1", @pending_request.book.title
   end
 
+  test "show displays diagnostics timeline for request activity" do
+    sign_out
+    sign_in_as(@admin)
+
+    RequestEvent.create!(
+      request: @pending_request,
+      event_type: "dispatch_failed",
+      source: "DownloadJob",
+      level: :error,
+      message: "Failed to connect to download client",
+      details: {
+        client_name: "SABnzbd"
+      }
+    )
+
+    get request_path(@pending_request)
+    assert_response :success
+    assert_select "h3", "Diagnostics"
+    assert_select "p", text: /Failed to connect to download client/
+    assert_select "p", text: /SABnzbd/
+  end
+
+  test "show hides diagnostics timeline from regular users" do
+    RequestEvent.create!(
+      request: @pending_request,
+      event_type: "dispatch_failed",
+      source: "DownloadJob",
+      level: :error,
+      message: "Failed to connect to download client"
+    )
+
+    get request_path(@pending_request)
+    assert_response :success
+    assert_select "h3", text: "Diagnostics", count: 0
+  end
+
   test "user cannot view another user's request" do
     other_user = users(:two)
     other_request = Request.create!(
@@ -178,6 +214,52 @@ class RequestsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "audiobook", book.book_type
     assert_equal @user, book.requests.last.user
     assert_redirected_to request_path(Request.last)
+  end
+
+  test "create auto-approves non-admin requests when setting is enabled" do
+    SettingsService.set(:auto_approve_requests, true)
+
+    assert_enqueued_with(job: SearchJob) do
+      post requests_path, params: {
+        work_id: "OL_AUTO_APPROVE_123W",
+        title: "Auto Approve Book",
+        author: "Trusted User",
+        book_type: "ebook"
+      }
+    end
+
+    assert_redirected_to request_path(Request.last)
+  end
+
+  test "create does not auto-approve admin requests when only auto approve requests is enabled" do
+    SettingsService.set(:auto_approve_requests, true)
+    sign_out
+    sign_in_as(@admin)
+
+    assert_no_enqueued_jobs only: SearchJob do
+      post requests_path, params: {
+        work_id: "OL_ADMIN_CREATE_123W",
+        title: "Admin Queue Book",
+        author: "Admin",
+        book_type: "ebook"
+      }
+    end
+
+    assert_redirected_to request_path(Request.last)
+  end
+
+  test "create enqueues search only once when immediate search and auto approve are both enabled" do
+    SettingsService.set(:immediate_search_enabled, true)
+    SettingsService.set(:auto_approve_requests, true)
+
+    assert_enqueued_jobs 1, only: SearchJob do
+      post requests_path, params: {
+        work_id: "OL_BOTH_FLAGS_123W",
+        title: "Dual Trigger Book",
+        author: "Trusted User",
+        book_type: "ebook"
+      }
+    end
   end
 
   test "create reuses existing book" do
@@ -264,6 +346,27 @@ class RequestsControllerTest < ActionDispatch::IntegrationTest
     assert_difference [ "Request.count", "Book.count" ], -1 do
       delete request_path(request)
     end
+  end
+
+  test "destroy succeeds when request has download-linked diagnostics" do
+    download = @pending_request.downloads.create!(
+      name: "Pending Download",
+      status: :queued
+    )
+    RequestEvent.create!(
+      request: @pending_request,
+      download: download,
+      event_type: "dispatch_started",
+      source: "DownloadJob",
+      level: :info,
+      message: "Dispatch started"
+    )
+
+    assert_difference "Request.count", -1 do
+      delete request_path(@pending_request)
+    end
+
+    assert_redirected_to requests_path
   end
 
   test "destroy does not clean up book with file" do

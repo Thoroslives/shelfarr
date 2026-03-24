@@ -79,6 +79,21 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
     end
   end
 
+  test "handles qBittorrent v5 stoppedUP state as completed and triggers post-processing" do
+    VCR.turned_off do
+      stub_qbittorrent_auth
+      stub_qbittorrent_torrent_info(progress: 100, state: "stoppedUP")
+
+      assert_enqueued_with(job: PostProcessingJob, args: [@download.id]) do
+        DownloadMonitorJob.perform_now
+      end
+
+      @download.reload
+      assert @download.completed?
+      assert_equal 100, @download.progress
+    end
+  end
+
   test "does not immediately fail download on first not-found" do
     VCR.turned_off do
       stub_qbittorrent_auth
@@ -245,6 +260,29 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
       assert @download.downloading?
       assert_equal 50, @download.progress
     end
+  end
+
+  test "flags queued downloads that never reached a client" do
+    @download.update_columns(
+      status: Download.statuses[:queued],
+      external_id: nil,
+      download_client_id: nil,
+      created_at: 10.minutes.ago,
+      updated_at: 10.minutes.ago
+    )
+
+    SettingsService.set(:download_enqueue_timeout_minutes, 5)
+
+    assert_enqueued_with(job: DownloadMonitorJob) do
+      DownloadMonitorJob.perform_now
+    end
+
+    @download.reload
+    @request.reload
+
+    assert @download.failed?
+    assert @request.attention_needed?
+    assert_includes @request.issue_description, "never sent to the download client"
   end
 
   test "skips downloads with disabled client" do

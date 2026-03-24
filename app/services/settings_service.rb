@@ -9,6 +9,7 @@ class SettingsService
     # Download Settings (clients are now managed separately via Admin > Download Clients)
     preferred_download_type: { type: "string", default: "torrent", category: "download", description: "Preferred download type when both available (torrent or usenet)" },
     download_check_interval: { type: "integer", default: 60, category: "download", description: "Seconds between download status checks" },
+    download_enqueue_timeout_minutes: { type: "integer", default: 5, category: "download", description: "Minutes a download may stay queued in Shelfarr before being flagged as never dispatched to the download client" },
     remove_completed_usenet_downloads: { type: "boolean", default: true, category: "download", description: "Remove usenet downloads from client after successful import" },
 
     # Audiobookshelf Integration
@@ -30,6 +31,7 @@ class SettingsService
 
     # Queue Settings
     immediate_search_enabled: { type: "boolean", default: false, category: "queue", description: "Start searching immediately when a request is created (instead of waiting for queue cycle)" },
+    auto_approve_requests: { type: "boolean", default: false, category: "queue", description: "Automatically enqueue search immediately for requests created by non-admin users" },
     queue_batch_size: { type: "integer", default: 5, category: "queue", description: "Number of requests to process per queue run" },
     rate_limit_delay: { type: "integer", default: 2, category: "queue", description: "Seconds between API calls" },
     max_retries: { type: "integer", default: 10, category: "queue", description: "Maximum retry attempts before flagging for attention" },
@@ -236,6 +238,10 @@ class SettingsService
 
     def user_uploads_allowed?
       get(:allow_user_uploads, default: false)
+    end
+
+    def auto_approve_requests?
+      get(:auto_approve_requests, default: false)
     end
   end
 end
