@@ -1,3 +1,12 @@
+<% if @oidc_auto_redirect %>
+  <div class="mx-auto md:w-2/3 w-full text-center">
+    <h1 class="font-bold text-4xl text-white mb-4">Redirecting...</h1>
+    <p class="text-gray-400">Signing you in via <%= SettingsService.get(:oidc_provider_name, default: "SSO") %></p>
+    <%= form_with url: "/auth/oidc", method: :post, data: { turbo: false }, html: { id: "oidc-auto-redirect" } do %>
+    <% end %>
+    <script>document.getElementById("oidc-auto-redirect").submit();</script>
+  </div>
+<% else %>
 <div class="mx-auto md:w-2/3 w-full">
   <h1 class="font-bold text-4xl text-white">Sign in</h1>
 
@@ -51,3 +60,4 @@
     <% end %>
   <% end %>
 </div>
+<% end %>

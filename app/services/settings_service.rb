@@ -92,7 +92,8 @@ class SettingsService
     oidc_client_secret: { type: "string", default: "", category: "oidc", description: "OIDC client secret from your identity provider" },
     oidc_scopes: { type: "string", default: "openid profile email", category: "oidc", description: "OIDC scopes to request (space-separated)" },
     oidc_auto_create_users: { type: "boolean", default: false, category: "oidc", description: "Automatically create new users on first OIDC login" },
-    oidc_default_role: { type: "string", default: "user", category: "oidc", description: "Default role for auto-created OIDC users (user or admin)" }
+    oidc_default_role: { type: "string", default: "user", category: "oidc", description: "Default role for auto-created OIDC users (user or admin)" },
+    oidc_auto_redirect: { type: "boolean", default: false, category: "oidc", description: "Automatically redirect unauthenticated users to OIDC provider (skip local login page)" }
   }.freeze
 
   CATEGORIES = {

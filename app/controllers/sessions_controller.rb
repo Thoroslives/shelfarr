@@ -4,6 +4,11 @@ class SessionsController < ApplicationController
 
   def new
     redirect_to sign_up_path if User.active.none?
+    return if performed?
+
+    if SettingsService.oidc_configured? && SettingsService.get(:oidc_auto_redirect, default: false)
+      @oidc_auto_redirect = true
+    end
   end
 
   def create
