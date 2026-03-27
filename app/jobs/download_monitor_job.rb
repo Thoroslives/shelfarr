@@ -3,11 +3,51 @@
 # Recurring job that monitors active downloads and triggers post-processing on completion
 class DownloadMonitorJob < ApplicationJob
   NOT_FOUND_THRESHOLD = 3
+  SCHEDULE_CACHE_KEY = "download_monitor/next_run_at"
 
   queue_as :default
 
+  class << self
+    def ensure_running!
+      return unless DownloadClient.enabled.exists?
+
+      interval = poll_interval_seconds
+      next_run_at = Rails.cache.read(SCHEDULE_CACHE_KEY).to_i
+      return if next_run_at > Time.current.to_i
+
+      reserve_schedule!(interval)
+      Rails.logger.info "[DownloadMonitorJob] Scheduling monitor chain"
+      perform_later
+    end
+
+    def clear_schedule!
+      Rails.cache.delete(SCHEDULE_CACHE_KEY)
+    end
+
+    private
+
+    def reserve_schedule!(interval)
+      Rails.cache.write(
+        SCHEDULE_CACHE_KEY,
+        interval.seconds.from_now.to_i,
+        expires_in: schedule_ttl(interval)
+      )
+    end
+
+    def poll_interval_seconds
+      SettingsService.get(:download_check_interval, default: 60).to_i.clamp(1, 86_400)
+    end
+
+    def schedule_ttl(interval)
+      [interval * 3, 300].max.seconds
+    end
+  end
+
   def perform
-    return unless any_client_configured?
+    unless any_client_configured?
+      self.class.clear_schedule!
+      return
+    end
 
     monitor_active_downloads
     schedule_next_run
@@ -119,7 +159,12 @@ class DownloadMonitorJob < ApplicationJob
   end
 
   def schedule_next_run
-    interval = SettingsService.get(:download_check_interval, default: 60)
+    interval = self.class.send(:poll_interval_seconds)
+    Rails.cache.write(
+      self.class::SCHEDULE_CACHE_KEY,
+      interval.seconds.from_now.to_i,
+      expires_in: self.class.send(:schedule_ttl, interval)
+    )
     DownloadMonitorJob.set(wait: interval.seconds).perform_later
   end
 

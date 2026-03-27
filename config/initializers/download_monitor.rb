@@ -7,7 +7,7 @@ Rails.application.config.after_initialize do
     # Check if any download client is configured
     if DownloadClient.enabled.exists?
       Rails.logger.info "[Shelfarr] Starting DownloadMonitorJob chain"
-      DownloadMonitorJob.perform_later
+      DownloadMonitorJob.ensure_running!
     else
       Rails.logger.info "[Shelfarr] No download client configured, DownloadMonitorJob not started"
     end

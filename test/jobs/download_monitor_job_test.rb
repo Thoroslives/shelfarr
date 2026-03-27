@@ -4,6 +4,9 @@ require "test_helper"
 
 class DownloadMonitorJobTest < ActiveJob::TestCase
   setup do
+    @original_cache = Rails.cache
+    Rails.cache = ActiveSupport::Cache::MemoryStore.new
+    DownloadMonitorJob.clear_schedule!
     DownloadClient.destroy_all
     @request = requests(:pending_request)
 
@@ -31,6 +34,11 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
       progress: 50,
       download_client: @qbittorrent
     )
+  end
+
+  teardown do
+    DownloadMonitorJob.clear_schedule!
+    Rails.cache = @original_cache
   end
 
   test "does nothing when no download client configured" do
@@ -243,6 +251,73 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
       @download.reload
 
       assert_equal 75, @download.progress
+    end
+  end
+
+  test "handles completed SABnzbd download from history" do
+    sabnzbd = DownloadClient.create!(
+      name: "History SABnzbd",
+      client_type: "sabnzbd",
+      url: "http://localhost:8080",
+      api_key: "test-api-key",
+      priority: 0,
+      enabled: true
+    )
+
+    @download.update!(
+      download_type: "usenet",
+      external_id: "SABnzbd_nzo_history_123",
+      download_client: sabnzbd,
+      progress: 0
+    )
+
+    VCR.turned_off do
+      stub_request(:get, %r{localhost:8080/api.*mode=queue})
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: { "queue" => { "slots" => [] } }.to_json
+        )
+
+      stub_request(:get, %r{localhost:8080/api.*mode=history})
+        .to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/json" },
+          body: {
+            "history" => {
+              "slots" => [
+                {
+                  "nzo_id" => "SABnzbd_nzo_history_123",
+                  "name" => "Completed Download",
+                  "status" => "Completed",
+                  "bytes" => 1024,
+                  "storage" => "/downloads/complete/Completed Download"
+                }
+              ]
+            }
+          }.to_json
+        )
+
+      assert_enqueued_with(job: PostProcessingJob, args: [@download.id]) do
+        DownloadMonitorJob.perform_now
+      end
+
+      @download.reload
+      assert @download.completed?
+      assert_equal 100, @download.progress
+      assert_equal "/downloads/complete/Completed Download", @download.download_path
+    end
+  end
+
+  test "ensure_running! only enqueues one monitor job while scheduled" do
+    SettingsService.set(:download_check_interval, 60)
+
+    assert_enqueued_with(job: DownloadMonitorJob) do
+      DownloadMonitorJob.ensure_running!
+    end
+
+    assert_no_enqueued_jobs do
+      DownloadMonitorJob.ensure_running!
     end
   end
 
