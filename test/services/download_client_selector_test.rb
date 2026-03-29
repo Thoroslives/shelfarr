@@ -8,6 +8,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
     Thread.current[:qbittorrent_sessions] = {}
     Thread.current[:deluge_sessions] = {}
     Thread.current[:transmission_sessions] = {}
+    Thread.current[:transmission_protocols] = {}
   end
 
   test "selects torrent client for torrent download" do
@@ -190,18 +191,30 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
         )
 
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"session-get"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["jsonrpc"] == "2.0" &&
+            body["method"] == "session_get" &&
+            body["params"] == {} &&
+            body["id"] == 1
+        end
         .to_return(
           status: 409,
           headers: { "x-transmission-session-id" => "transmission-session-id" },
           body: { "result" => "session", "arguments" => {} }.to_json
         )
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"session-get"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["jsonrpc"] == "2.0" &&
+            body["method"] == "session_get" &&
+            body["params"] == {} &&
+            body["id"] == 1
+        end
         .to_return(
           status: 200,
           headers: { "Content-Type" => "application/json" },
-          body: { "result" => "success", "arguments" => {} }.to_json
+          body: { "jsonrpc" => "2.0", "result" => { "version" => "4.1.1" }, "id" => 1 }.to_json
         )
 
       search_result = Minitest::Mock.new

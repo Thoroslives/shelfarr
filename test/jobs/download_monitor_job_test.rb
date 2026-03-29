@@ -23,6 +23,8 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
 
     # Clear qBittorrent sessions
     Thread.current[:qbittorrent_sessions] = {}
+    Thread.current[:transmission_sessions] = {}
+    Thread.current[:transmission_protocols] = {}
 
     # Create an active download associated with the client
     @download = @request.downloads.create!(
@@ -172,7 +174,6 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
       priority: 0,
       enabled: true
     )
-    Thread.current[:transmission_sessions] = {}
     @download.update!(
       external_id: "transmission-hash",
       download_client: transmission
@@ -180,7 +181,13 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
 
     VCR.turned_off do
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"session-get"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["jsonrpc"] == "2.0" &&
+            body["method"] == "session_get" &&
+            body["params"] == {} &&
+            body["id"] == 1
+        end
         .to_return(
           {
             status: 409,
@@ -190,30 +197,40 @@ class DownloadMonitorJobTest < ActiveJob::TestCase
           {
             status: 200,
             headers: { "Content-Type" => "application/json" },
-            body: { "result" => "success", "arguments" => {} }.to_json
+            body: { "jsonrpc" => "2.0", "result" => { "version" => "4.1.1" }, "id" => 1 }.to_json
           }
         )
       stub_request(:post, "http://localhost:9091/transmission/rpc")
-        .with(body: /"method"\s*:\s*"torrent-get"/)
+        .with do |request|
+          body = JSON.parse(request.body)
+          body["jsonrpc"] == "2.0" &&
+            body["method"] == "torrent_get" &&
+            body["params"] == {
+              "ids" => [ "transmission-hash" ],
+              "fields" => DownloadClients::Transmission::TORRENT_FIELDS
+            } &&
+            body["id"] == 1
+        end
         .to_return(
           status: 200,
           headers: { "Content-Type" => "application/json" },
           body: {
-            "result" => "success",
-            "arguments" => {
+            "jsonrpc" => "2.0",
+            "result" => {
               "torrents" => [
                 {
-                  "hashString" => "transmission-hash",
+                  "hash_string" => "transmission-hash",
                   "name" => "Test Audiobook",
-                  "percentDone" => 0.0,
+                  "percent_done" => 0.0,
                   "status" => 4,
                   "error" => 3,
-                  "errorString" => "Permission denied",
-                  "totalSize" => 1073741824,
-                  "downloadDir" => "/downloads/complete/Test Audiobook"
+                  "error_string" => "Permission denied",
+                  "total_size" => 1073741824,
+                  "download_dir" => "/downloads/complete/Test Audiobook"
                 }
               ]
-            }
+            },
+            "id" => 1
           }.to_json
         )
 
