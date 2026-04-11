@@ -55,6 +55,59 @@ class OutboundNotifications::WebhookDeliveryTest < ActiveSupport::TestCase
     assert_includes error.message, "HTTP 500"
   end
 
+  test "deliver! includes topic in payload when configured" do
+    SettingsService.set(:webhook_topic, "shelfarr")
+
+    stub = stub_request(:post, "http://localhost:4567/webhook")
+      .with do |request|
+        json = JSON.parse(request.body)
+        json["topic"] == "shelfarr" &&
+          json["event"] == "request_completed"
+      end
+      .to_return(status: 200, body: "{\"ok\":true}", headers: { "Content-Type" => "application/json" })
+
+    OutboundNotifications::WebhookDelivery.deliver!(
+      event: "request_completed",
+      title: "Book Ready",
+      message: "test",
+      request: @request
+    )
+
+    assert_requested(stub)
+  end
+
+  test "test_payload includes topic when configured" do
+    SettingsService.set(:webhook_topic, "shelfarr")
+
+    payload = OutboundNotifications::WebhookDelivery.test_payload
+
+    assert_equal "shelfarr", payload[:topic]
+  end
+
+  test "test_payload omits topic when not configured" do
+    payload = OutboundNotifications::WebhookDelivery.test_payload
+
+    assert_not payload.key?(:topic)
+  end
+
+  test "deliver! omits topic from payload when not configured" do
+    stub = stub_request(:post, "http://localhost:4567/webhook")
+      .with do |request|
+        json = JSON.parse(request.body)
+        !json.key?("topic")
+      end
+      .to_return(status: 200, body: "{\"ok\":true}", headers: { "Content-Type" => "application/json" })
+
+    OutboundNotifications::WebhookDelivery.deliver!(
+      event: "request_completed",
+      title: "Book Ready",
+      message: "test",
+      request: @request
+    )
+
+    assert_requested(stub)
+  end
+
   test "deliver! raises a delivery error for invalid webhook URLs" do
     SettingsService.set(:webhook_url, "ht!tp://bad")
 

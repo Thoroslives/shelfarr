@@ -113,6 +113,7 @@ class SettingsService
     webhook_url: { type: "string", default: "", category: "webhook", description: "Webhook endpoint URL. Shelfarr sends a JSON payload for each enabled event." },
     webhook_token: { type: "string", default: "", category: "webhook", description: "Optional Bearer token for webhook authentication" },
     webhook_events: { type: "string", default: "request_created,request_completed,request_failed,request_attention", category: "webhook", description: "Comma-separated webhook events to send" },
+    webhook_topic: { type: "string", default: "", category: "webhook", description: "Optional topic field included in webhook JSON payload (required by ntfy when posting to the server base URL)" },
 
     # OIDC/SSO Authentication
     oidc_enabled: { type: "boolean", default: false, category: "oidc", description: "Enable OpenID Connect (OIDC) single sign-on authentication" },
