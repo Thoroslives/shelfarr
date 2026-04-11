@@ -197,6 +197,18 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "get_free_download_url skips Z-Library and uses LibGen" do
+    VCR.turned_off do
+      stub_anna_md5_page_with_mirrors
+      stub_libgen_ads_page
+
+      url = AnnaArchiveClient.get_free_download_url("abc123def456")
+
+      # Should use LibGen (priority 0) not Z-Library (priority 1)
+      assert_match(/libgen/, url)
+    end
+  end
+
   test "get_free_download_url skips slow_download links" do
     VCR.turned_off do
       stub_anna_md5_page_only_slow_download
