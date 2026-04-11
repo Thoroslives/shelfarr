@@ -23,18 +23,23 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     assert_not AnnaArchiveClient.configured?
   end
 
-  test "configured? returns false when key is empty" do
+  test "configured? returns true even when key is empty" do
     SettingsService.set(:anna_archive_api_key, "")
-    assert_not AnnaArchiveClient.configured?
+    assert AnnaArchiveClient.configured?
   end
 
-  test "enabled? returns true when setting is enabled" do
-    assert AnnaArchiveClient.enabled?
+  test "configured? returns true when enabled without API key" do
+    SettingsService.set(:anna_archive_api_key, "")
+    assert AnnaArchiveClient.configured?
   end
 
-  test "enabled? returns false when setting is disabled" do
-    SettingsService.set(:anna_archive_enabled, false)
-    assert_not AnnaArchiveClient.enabled?
+  test "has_api_key? returns true when key is set" do
+    assert AnnaArchiveClient.has_api_key?
+  end
+
+  test "has_api_key? returns false when key is empty" do
+    SettingsService.set(:anna_archive_api_key, "")
+    assert_not AnnaArchiveClient.has_api_key?
   end
 
   test "search raises NotConfiguredError when not configured" do

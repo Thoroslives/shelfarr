@@ -26,15 +26,14 @@ class AnnaArchiveClient
   end
 
   class << self
-    # Check if Anna's Archive is configured (has API key)
+    # Check if Anna's Archive is enabled for search (no API key needed)
     def configured?
-      SettingsService.configured?(:anna_archive_api_key) &&
-        SettingsService.get(:anna_archive_enabled, default: false)
+      SettingsService.get(:anna_archive_enabled, default: false)
     end
 
-    # Check if Anna's Archive is enabled but not necessarily with key
-    def enabled?
-      SettingsService.get(:anna_archive_enabled, default: false)
+    # Check if paid API key is available for fast downloads
+    def has_api_key?
+      SettingsService.configured?(:anna_archive_api_key)
     end
 
     # Search for books via HTML scraping
