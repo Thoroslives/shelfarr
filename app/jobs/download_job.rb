@@ -69,19 +69,28 @@ class DownloadJob < ApplicationJob
   private
 
   def handle_anna_archive_download(download, search_result)
-    # Fetch actual download URL from Anna's Archive API
     md5 = search_result.guid
-    Rails.logger.info "[DownloadJob] Fetching download URL from Anna's Archive for MD5: #{md5}"
+    download_url = nil
 
-    download_url = AnnaArchiveClient.get_download_url(md5)
+    if AnnaArchiveClient.has_api_key?
+      begin
+        Rails.logger.info "[DownloadJob] Using paid API for MD5: #{md5}"
+        download_url = AnnaArchiveClient.get_download_url(md5)
+      rescue AnnaArchiveClient::Error => e
+        Rails.logger.warn "[DownloadJob] Paid API failed, falling back to free download: #{e.message}"
+      end
+    end
+
+    unless download_url
+      Rails.logger.info "[DownloadJob] Using free download (mirror) for MD5: #{md5}"
+      download_url = AnnaArchiveClient.get_free_download_url(md5)
+    end
+
     Rails.logger.info "[DownloadJob] Got download URL: #{download_url.truncate(100)}"
 
-    # Check if it's a torrent/magnet link or direct download
     if download_url.start_with?("magnet:") || download_url.end_with?(".torrent")
-      # Send to torrent client
       send_to_torrent_client(download, search_result, download_url)
     else
-      # Direct HTTP download - download file directly
       Rails.logger.info "[DownloadJob] Anna's Archive returned direct link, downloading via HTTP"
       handle_direct_http_download(download, search_result, download_url)
     end

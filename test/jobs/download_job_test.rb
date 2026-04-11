@@ -254,6 +254,83 @@ class DownloadJobTest < ActiveJob::TestCase
     assert filename.end_with?(".epub") || filename.end_with?(".pdf") || filename.end_with?(".mobi")
   end
 
+  test "anna archive download uses paid API when key is available" do
+    VCR.turned_off do
+      setup_anna_archive_download
+      SettingsService.set(:anna_archive_api_key, "test-key")
+
+      stub_request(:get, /annas-archive\.org\/dyn\/api\/fast_download\.json/)
+        .to_return(status: 200, body: { download_url: "https://fast.example.com/book.epub" }.to_json)
+      stub_request(:get, "https://fast.example.com/book.epub")
+        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.completed?
+      assert_requested(:get, /fast_download\.json/)
+
+      SettingsService.set(:anna_archive_api_key, "")
+    end
+  end
+
+  test "anna archive download falls back to free when paid fails" do
+    VCR.turned_off do
+      setup_anna_archive_download
+      SettingsService.set(:anna_archive_api_key, "test-key")
+
+      stub_request(:get, /annas-archive\.org\/dyn\/api\/fast_download\.json/)
+        .to_return(status: 200, body: { error: "Rate limited" }.to_json)
+      stub_anna_mirror_download_flow
+      stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
+        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.completed?
+      assert_requested(:get, /fast_download\.json/)
+      assert_requested(:get, /libgen\.li\/ads\.php/)
+
+      SettingsService.set(:anna_archive_api_key, "")
+    end
+  end
+
+  test "anna archive download uses free directly when no API key" do
+    VCR.turned_off do
+      setup_anna_archive_download
+
+      stub_anna_mirror_download_flow
+      stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
+        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.completed?
+      assert_not_requested(:get, /fast_download\.json/)
+    end
+  end
+
+  test "anna archive download fails when both paid and free fail" do
+    VCR.turned_off do
+      setup_anna_archive_download
+      SettingsService.set(:anna_archive_api_key, "test-key")
+
+      stub_request(:get, /annas-archive\.org\/dyn\/api\/fast_download\.json/)
+        .to_return(status: 200, body: { error: "Rate limited" }.to_json)
+      stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
+        .to_return(status: 200, body: "<html><body><div id='md5-panel-downloads'></div></body></html>")
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.failed?
+
+      SettingsService.set(:anna_archive_api_key, "")
+    end
+  end
+
   private
 
   def stub_qbittorrent_success
@@ -292,5 +369,56 @@ class DownloadJobTest < ActiveJob::TestCase
         headers: { "Content-Type" => "application/json" },
         body: [{ "hash" => expected_hash, "name" => "Test Torrent", "progress" => 0, "state" => "downloading", "size" => 1000, "content_path" => "/downloads/Test Torrent" }].to_json
       )
+  end
+
+  def setup_anna_archive_download
+    SettingsService.set(:anna_archive_enabled, true)
+    SettingsService.set(:anna_archive_url, "https://annas-archive.org")
+    SettingsService.set(:anna_archive_api_key, "")
+    SettingsService.set(:ebook_output_path, Dir.tmpdir)
+
+    anna_result = @request.search_results.create!(
+      guid: "abc123def456",
+      title: "Test Book [EPUB]",
+      indexer: "Anna's Archive",
+      source: SearchResult::SOURCE_ANNA_ARCHIVE,
+      status: :selected
+    )
+    @request.search_results.where.not(id: anna_result.id).update_all(status: :pending)
+
+    @anna_download = @request.downloads.create!(
+      name: anna_result.title,
+      size_bytes: 1_000_000,
+      status: :queued
+    )
+    # Mark original download as non-queued so it doesn't interfere
+    @download.update!(status: :completed)
+  end
+
+  def stub_anna_mirror_download_flow
+    md5_html = <<~HTML
+      <html>
+        <body>
+          <div id="md5-panel-downloads">
+            <ul>
+              <li><a href="https://libgen.li/ads.php?md5=abc123def456">Libgen.li</a></li>
+            </ul>
+          </div>
+        </body>
+      </html>
+    HTML
+
+    ads_html = <<~HTML
+      <html>
+        <body>
+          <a href="get.php?md5=abc123def456&key=TESTKEY123">GET</a>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
+      .to_return(status: 200, body: md5_html)
+    stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+      .to_return(status: 200, body: ads_html)
   end
 end
