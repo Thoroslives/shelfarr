@@ -249,10 +249,9 @@ class AnnaArchiveClient
     end
 
     def resolve_zlibrary_download(url)
-      # Z-Library requires authentication for downloads - not automatable
-      # without storing user credentials. Skipping by design.
-      # LibGen and IPFS provide sufficient fallback coverage.
-      Rails.logger.info "[AnnaArchiveClient] Skipping Z-Library (requires auth): #{url}"
+      # Z-Library download flow - needs research during implementation
+      # May require fetch_with_protection_bypass if DDoS-Guard protected
+      Rails.logger.info "[AnnaArchiveClient] Z-Library resolver not yet implemented, skipping: #{url}"
       nil
     end
 
