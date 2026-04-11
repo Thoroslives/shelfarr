@@ -10,6 +10,7 @@ class AnnaArchiveClient
   class NotConfiguredError < Error; end
   class ScrapingError < Error; end
   class BotProtectionError < Error; end
+  class FreeDownloadError < Error; end
 
   # Data structure for search results
   Result = Data.define(
@@ -81,6 +82,42 @@ class AnnaArchiveClient
       raise ConnectionError, "Failed to connect to Anna's Archive API: #{e.message}"
     end
 
+    # Get download URL via free mirror scraping
+    # Parses the MD5 detail page for mirror links and tries each in priority order
+    def get_free_download_url(md5)
+      ensure_configured!
+
+      Rails.logger.info "[AnnaArchiveClient] Fetching free download URL for MD5: #{md5}"
+
+      md5_url = "#{base_url}/md5/#{md5}"
+      md5_html = fetch_with_protection_bypass(md5_url)
+
+      mirrors = extract_mirror_links(md5_html)
+      if mirrors.empty?
+        raise FreeDownloadError, "No mirror links found on MD5 page for: #{md5}"
+      end
+
+      Rails.logger.info "[AnnaArchiveClient] Found #{mirrors.size} mirror(s): #{mirrors.map { |m| m[:name] }.join(', ')}"
+
+      last_error = nil
+      mirrors.each do |mirror|
+        begin
+          url = resolve_mirror_download(mirror)
+          if url.present?
+            Rails.logger.info "[AnnaArchiveClient] Got free download URL via #{mirror[:name]}: #{url.truncate(100)}"
+            return url
+          end
+        rescue => e
+          Rails.logger.warn "[AnnaArchiveClient] Mirror #{mirror[:name]} failed: #{e.message}"
+          last_error = e
+        end
+      end
+
+      raise FreeDownloadError, "All #{mirrors.size} mirror(s) failed for MD5: #{md5}. Last error: #{last_error&.message}"
+    rescue Faraday::ConnectionFailed, Faraday::TimeoutError, Faraday::SSLError => e
+      raise ConnectionError, "Failed to connect: #{e.message}"
+    end
+
     # Test connection by fetching search page
     def test_connection
       response = connection.get("/")
@@ -132,6 +169,114 @@ class AnnaArchiveClient
         f.request :url_encoded
         f.adapter Faraday.default_adapter
         f.headers["User-Agent"] = "Shelfarr/1.0"
+        f.options.timeout = 30
+        f.options.open_timeout = 10
+      end
+    end
+
+    # Extract mirror links from the MD5 page download panel
+    def extract_mirror_links(html)
+      require "nokogiri"
+
+      doc = Nokogiri::HTML(html)
+      panel = doc.at_css("#md5-panel-downloads")
+      return [] unless panel
+
+      mirrors = []
+      panel.css("a[href]").each do |link|
+        href = link["href"].to_s
+        next if href.blank?
+        next if href.include?("slow_download")
+
+        mirror = classify_mirror(href, link.text.to_s)
+        mirrors << mirror if mirror
+      end
+
+      # Sort by priority: libgen first, then zlibrary, then ipfs, then unknown
+      priority = { libgen: 0, zlibrary: 1, ipfs: 2, unknown: 3 }
+      mirrors.sort_by { |m| priority[m[:name]] || 99 }
+    end
+
+    def classify_mirror(href, text)
+      if href.include?("libgen")
+        { name: :libgen, url: href }
+      elsif href.include?("z-lib") || href.include?("zlibrary") || href.include?("singlelogin")
+        { name: :zlibrary, url: href }
+      elsif href.include?("ipfs")
+        { name: :ipfs, url: href }
+      elsif href.start_with?("http")
+        { name: :unknown, url: href }
+      end
+    end
+
+    def resolve_mirror_download(mirror)
+      case mirror[:name]
+      when :libgen
+        resolve_libgen_download(mirror[:url])
+      when :zlibrary
+        resolve_zlibrary_download(mirror[:url])
+      when :ipfs
+        resolve_ipfs_download(mirror[:url])
+      else
+        Rails.logger.info "[AnnaArchiveClient] Skipping unknown mirror: #{mirror[:url]}"
+        nil
+      end
+    end
+
+    def resolve_libgen_download(url)
+      Rails.logger.info "[AnnaArchiveClient] Resolving LibGen download: #{url}"
+
+      response = mirror_connection.get(url)
+      raise FreeDownloadError, "LibGen ads page returned #{response.status}" unless response.status == 200
+
+      require "nokogiri"
+      doc = Nokogiri::HTML(response.body)
+      get_link = doc.at_css("a[href*='get.php']")
+      unless get_link
+        raise FreeDownloadError, "No get.php download link found on LibGen ads page"
+      end
+
+      download_path = get_link["href"].to_s
+      return nil if download_path.blank?
+
+      # Build absolute URL if relative
+      if download_path.start_with?("http")
+        download_path
+      else
+        uri = URI.parse(url)
+        "#{uri.scheme}://#{uri.host}/#{download_path.delete_prefix('/')}"
+      end
+    end
+
+    def resolve_zlibrary_download(url)
+      # Z-Library download flow - needs research during implementation
+      # May require fetch_with_protection_bypass if DDoS-Guard protected
+      Rails.logger.info "[AnnaArchiveClient] Z-Library resolver not yet implemented, skipping: #{url}"
+      nil
+    end
+
+    def resolve_ipfs_download(url)
+      # IPFS gateway URLs are typically direct downloads
+      Rails.logger.info "[AnnaArchiveClient] Resolving IPFS download: #{url}"
+
+      response = mirror_connection.head(url)
+      if response.status.between?(200, 399)
+        url
+      else
+        raise FreeDownloadError, "IPFS gateway returned #{response.status}"
+      end
+    rescue Faraday::ConnectionFailed, Faraday::TimeoutError => e
+      raise FreeDownloadError, "IPFS gateway unreachable: #{e.message}"
+    end
+
+    def mirror_connection
+      require "faraday/follow_redirects"
+
+      @mirror_connection ||= Faraday.new do |f|
+        f.request :url_encoded
+        f.response :follow_redirects
+        f.adapter Faraday.default_adapter
+        f.headers["User-Agent"] = "Mozilla/5.0 (compatible; Shelfarr/1.0)"
         f.options.timeout = 30
         f.options.open_timeout = 10
       end

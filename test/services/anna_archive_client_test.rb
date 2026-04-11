@@ -157,6 +157,56 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "get_free_download_url returns download URL via LibGen mirror" do
+    VCR.turned_off do
+      stub_anna_md5_page_with_mirrors
+      stub_libgen_ads_page
+
+      url = AnnaArchiveClient.get_free_download_url("abc123def456")
+
+      assert_equal "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123", url
+    end
+  end
+
+  test "get_free_download_url raises FreeDownloadError when no mirrors found" do
+    VCR.turned_off do
+      stub_anna_md5_page_no_mirrors
+
+      assert_raises AnnaArchiveClient::FreeDownloadError do
+        AnnaArchiveClient.get_free_download_url("abc123def456")
+      end
+    end
+  end
+
+  test "get_free_download_url raises FreeDownloadError when LibGen has no get.php link" do
+    VCR.turned_off do
+      stub_anna_md5_page_with_mirrors
+      stub_libgen_ads_page_no_download
+
+      assert_raises AnnaArchiveClient::FreeDownloadError do
+        AnnaArchiveClient.get_free_download_url("abc123def456")
+      end
+    end
+  end
+
+  test "get_free_download_url raises NotConfiguredError when disabled" do
+    SettingsService.set(:anna_archive_enabled, false)
+
+    assert_raises AnnaArchiveClient::NotConfiguredError do
+      AnnaArchiveClient.get_free_download_url("abc123def456")
+    end
+  end
+
+  test "get_free_download_url skips slow_download links" do
+    VCR.turned_off do
+      stub_anna_md5_page_only_slow_download
+
+      assert_raises AnnaArchiveClient::FreeDownloadError do
+        AnnaArchiveClient.get_free_download_url("abc123def456")
+      end
+    end
+  end
+
   private
 
   def stub_flaresolverr_with_search_results
@@ -220,5 +270,85 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
         status: 200,
         body: { download_url: "magnet:?xt=urn:btih:abc123def456" }.to_json
       )
+  end
+
+  def stub_anna_md5_page_with_mirrors
+    html = <<~HTML
+      <html>
+        <body>
+          <div id="md5-panel-downloads">
+            <ul>
+              <li><a href="/slow_download/abc123def456/0/0">Slow Server 1</a></li>
+              <li><a href="https://libgen.li/ads.php?md5=abc123def456">Libgen.li</a></li>
+              <li><a href="https://z-lib.gd/md5/abc123def456">Z-Library</a></li>
+            </ul>
+          </div>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
+      .to_return(status: 200, body: html)
+  end
+
+  def stub_anna_md5_page_no_mirrors
+    html = <<~HTML
+      <html>
+        <body>
+          <div id="md5-panel-downloads">
+            <p>No downloads available</p>
+          </div>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
+      .to_return(status: 200, body: html)
+  end
+
+  def stub_anna_md5_page_only_slow_download
+    html = <<~HTML
+      <html>
+        <body>
+          <div id="md5-panel-downloads">
+            <ul>
+              <li><a href="/slow_download/abc123def456/0/0">Slow Server 1</a></li>
+              <li><a href="/slow_download/abc123def456/0/1">Slow Server 2</a></li>
+            </ul>
+          </div>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
+      .to_return(status: 200, body: html)
+  end
+
+  def stub_libgen_ads_page
+    html = <<~HTML
+      <html>
+        <body>
+          <h1>Download</h1>
+          <a href="get.php?md5=abc123def456&key=TESTKEY123">GET</a>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+      .to_return(status: 200, body: html)
+  end
+
+  def stub_libgen_ads_page_no_download
+    html = <<~HTML
+      <html>
+        <body>
+          <h1>Error</h1>
+          <p>File not found</p>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+      .to_return(status: 200, body: html)
   end
 end
