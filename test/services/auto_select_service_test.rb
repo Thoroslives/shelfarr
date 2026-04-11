@@ -137,6 +137,31 @@ class AutoSelectServiceTest < ActiveSupport::TestCase
     assert other2.reload.rejected?
   end
 
+  test "anna archive results bypass seeder check" do
+    Setting.find_or_create_by(key: "auto_select_min_seeders").update!(
+      value: "100",
+      value_type: "integer",
+      category: "auto_select"
+    )
+
+    # AA results have nil seeders since they're direct downloads
+    result = create_search_result(
+      seeders: nil,
+      source: SearchResult::SOURCE_ANNA_ARCHIVE,
+      indexer: "Anna's Archive",
+      download_url: "https://annas-archive.org/slow_download/abc123/0/2"
+    )
+
+    assert_enqueued_with(job: DownloadJob) do
+      selection = AutoSelectService.call(@request)
+
+      assert selection.success?
+      assert_equal :auto_selected, selection.reason
+    end
+
+    assert result.reload.selected?
+  end
+
   test "selection result error reason works" do
     # Test that the SelectionResult with error reason works correctly
     result = AutoSelectService::SelectionResult.new(selected: false, reason: :error)
