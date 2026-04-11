@@ -49,11 +49,16 @@ module OutboundNotifications
       end
 
       def test_payload
-        {
+        payload = {
           event: TEST_EVENT,
           title: "Shelfarr Test",
           message: "Test notification from Shelfarr"
         }
+
+        topic = webhook_topic
+        payload[:topic] = topic if topic.present?
+
+        payload
       end
 
       private
@@ -100,6 +105,10 @@ module OutboundNotifications
         headers
       end
 
+      def webhook_topic
+        SettingsService.get(:webhook_topic).to_s.strip
+      end
+
       def build_payload(event:, title:, message:, request:)
         payload = {
           event: event,
@@ -107,6 +116,9 @@ module OutboundNotifications
           message: message,
           occurred_at: Time.current.iso8601
         }
+
+        topic = webhook_topic
+        payload[:topic] = topic if topic.present?
 
         return payload unless request.present?
 
