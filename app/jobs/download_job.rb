@@ -115,6 +115,9 @@ class DownloadJob < ApplicationJob
     # Download the file
     download_file_via_http(download_url, destination_path)
 
+    # Verify the downloaded file is actually an ebook
+    verify_ebook_file(destination_path)
+
     # Update download record as completed
     download.update!(
       status: :completed,
@@ -216,6 +219,44 @@ class DownloadJob < ApplicationJob
 
     file_size = File.size(destination)
     Rails.logger.info "[DownloadJob] Downloaded #{(file_size / 1024.0 / 1024.0).round(2)} MB"
+  end
+
+  # Verify downloaded file is actually an ebook, not an error page
+  def verify_ebook_file(path)
+    unless File.exist?(path)
+      raise "Downloaded file does not exist: #{path}"
+    end
+
+    file_size = File.size(path)
+
+    # Check magic bytes first
+    magic = File.binread(path, 4)
+    head = File.binread(path, 200).downcase
+
+    # Reject HTML error pages regardless of size
+    if head.include?("<html") || head.include?("<!doctype")
+      FileUtils.rm_f(path)
+      raise "Downloaded file is an HTML error page, not an ebook"
+    end
+
+    # Only apply size check for non-PDF/non-EPUB (unknown formats)
+    # Some legitimate pamphlets can be small, but error pages are
+    # typically HTML which is caught above
+    if file_size < 1_000 # 1KB minimum - even pamphlets are larger
+      FileUtils.rm_f(path)
+      raise "Downloaded file too small (#{file_size} bytes) - likely corrupt"
+    end
+
+    # Check magic bytes for known formats
+    valid_magic = [
+      "PK\x03\x04", # EPUB (ZIP container)
+      "%PDF"         # PDF
+    ]
+
+    unless valid_magic.any? { |m| magic.start_with?(m) }
+      # Unknown format but not HTML (HTML caught above) - allow it (could be MOBI, AZW3, etc.)
+      Rails.logger.warn "[DownloadJob] Unknown file format (magic: #{magic.bytes.map { |b| '%02x' % b }.join(' ')}), allowing"
+    end
   end
 
   def trigger_library_scan(book)

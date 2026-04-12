@@ -262,7 +262,7 @@ class DownloadJobTest < ActiveJob::TestCase
       stub_request(:get, /annas-archive\.org\/dyn\/api\/fast_download\.json/)
         .to_return(status: 200, body: { download_url: "https://fast.example.com/book.epub" }.to_json)
       stub_request(:get, "https://fast.example.com/book.epub")
-        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+        .to_return(status: 200, body: "PK\x03\x04" + "x" * 2000, headers: { "Content-Type" => "application/epub+zip" })
 
       DownloadJob.perform_now(@anna_download.id)
       @anna_download.reload
@@ -283,7 +283,7 @@ class DownloadJobTest < ActiveJob::TestCase
         .to_return(status: 200, body: { error: "Rate limited" }.to_json)
       stub_anna_mirror_download_flow
       stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
-        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+        .to_return(status: 200, body: "PK\x03\x04" + "x" * 2000, headers: { "Content-Type" => "application/epub+zip" })
 
       DownloadJob.perform_now(@anna_download.id)
       @anna_download.reload
@@ -302,7 +302,7 @@ class DownloadJobTest < ActiveJob::TestCase
 
       stub_anna_mirror_download_flow
       stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
-        .to_return(status: 200, body: "fake epub content", headers: { "Content-Type" => "application/epub+zip" })
+        .to_return(status: 200, body: "PK\x03\x04" + "x" * 2000, headers: { "Content-Type" => "application/epub+zip" })
 
       DownloadJob.perform_now(@anna_download.id)
       @anna_download.reload
@@ -328,6 +328,36 @@ class DownloadJobTest < ActiveJob::TestCase
       assert @anna_download.failed?
 
       SettingsService.set(:anna_archive_api_key, "")
+    end
+  end
+
+  test "anna archive download rejects HTML error page saved as ebook" do
+    VCR.turned_off do
+      setup_anna_archive_download
+      stub_anna_mirror_download_flow
+
+      stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
+        .to_return(status: 200, body: "<html><body>Error: File not found</body></html>", headers: { "Content-Type" => "text/html" })
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.failed?
+    end
+  end
+
+  test "anna archive download rejects tiny files" do
+    VCR.turned_off do
+      setup_anna_archive_download
+      stub_anna_mirror_download_flow
+
+      stub_request(:get, "https://libgen.li/get.php?md5=abc123def456&key=TESTKEY123")
+        .to_return(status: 200, body: "tiny", headers: { "Content-Type" => "application/epub+zip" })
+
+      DownloadJob.perform_now(@anna_download.id)
+      @anna_download.reload
+
+      assert @anna_download.failed?
     end
   end
 
