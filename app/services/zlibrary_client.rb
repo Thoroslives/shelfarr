@@ -36,6 +36,41 @@ class ZLibraryClient
       @auth_cache = nil
     end
 
+    # Search Z-Library for books via eAPI
+    # @param query [String] Search query
+    # @param file_types [Array<String>] File extensions to filter (e.g., ["epub", "pdf"])
+    # @param limit [Integer] Max results
+    # @param language [String] Language filter (e.g., "english")
+    def search(query, file_types: %w[epub pdf], limit: 50, language: nil)
+      ensure_configured!
+
+      auth = login
+      raise AuthenticationError, "Z-Library login failed" unless auth
+
+      Rails.logger.info "[ZLibraryClient] Searching: #{query}"
+
+      body_parts = [["message", query], ["limit", limit.to_s]]
+      file_types.each { |ext| body_parts << ["extensions[]", ext] }
+      body_parts << ["languages[]", language] if language.present?
+
+      response = connection.post("https://#{auth[:domain]}/eapi/book/search") do |req|
+        req.headers["Content-Type"] = "application/x-www-form-urlencoded"
+        req.headers["Cookie"] = "remix_userid=#{auth[:remix_userid]}; remix_userkey=#{auth[:remix_userkey]}"
+        req.body = URI.encode_www_form(body_parts)
+      end
+
+      raise ConnectionError, "Search failed with status #{response.status}" unless response.status == 200
+
+      data = JSON.parse(response.body)
+      books = data["books"] || []
+
+      results = parse_search_results(books, limit)
+      Rails.logger.info "[ZLibraryClient] Found #{results.size} results"
+      results
+    rescue Faraday::ConnectionFailed, Faraday::TimeoutError, Faraday::SSLError => e
+      raise ConnectionError, "Failed to connect to Z-Library: #{e.message}"
+    end
+
     private
 
     def login
@@ -79,6 +114,40 @@ class ZLibraryClient
 
     def ensure_configured!
       raise NotConfiguredError, "Z-Library is not configured" unless configured?
+    end
+
+    def parse_search_results(books, limit)
+      books.first(limit).filter_map do |book|
+        id = book["id"]&.to_s
+        hash = book["hash"]&.to_s
+        next if id.blank? || hash.blank?
+
+        Result.new(
+          id: id,
+          hash: hash,
+          title: book["name"].presence || book["title"].presence || "Unknown",
+          author: book["author"].presence || "Unknown",
+          year: book["year"].to_i.nonzero?,
+          file_type: book["extension"]&.downcase,
+          file_size: format_file_size(book["filesize"]),
+          language: book["language"]
+        )
+      end
+    end
+
+    def format_file_size(bytes_string)
+      bytes = bytes_string.to_i
+      return nil if bytes <= 0
+
+      if bytes >= 1_073_741_824
+        "#{(bytes / 1_073_741_824.0).round(1)} GB"
+      elsif bytes >= 1_048_576
+        "#{(bytes / 1_048_576.0).round(1)} MB"
+      elsif bytes >= 1024
+        "#{(bytes / 1024.0).round(1)} KB"
+      else
+        "#{bytes} B"
+      end
     end
 
     def connection

@@ -80,6 +80,77 @@ class ZLibraryClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "search returns results from eAPI" do
+    VCR.turned_off do
+      stub_zlibrary_login_success
+      stub_zlibrary_search_success
+
+      results = ZLibraryClient.search("Test Book")
+
+      assert_equal 1, results.size
+      result = results.first
+      assert_equal "999", result.id
+      assert_equal "deadbeef", result.hash
+      assert_equal "Test Book Title", result.title
+      assert_equal "Test Author", result.author
+      assert_equal "epub", result.file_type
+      assert_equal "5.2 MB", result.file_size
+      assert_equal 2023, result.year
+      assert_equal "english", result.language
+    end
+  end
+
+  test "search returns empty array when no results" do
+    VCR.turned_off do
+      stub_zlibrary_login_success
+      stub_request(:post, "https://z-library.bz/eapi/book/search")
+        .to_return(
+          status: 200,
+          body: { success: 1, books: [] }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      results = ZLibraryClient.search("Nonexistent Book")
+
+      assert_equal [], results
+    end
+  end
+
+  test "search raises NotConfiguredError when not configured" do
+    SettingsService.set(:zlibrary_email, "")
+
+    assert_raises ZLibraryClient::NotConfiguredError do
+      ZLibraryClient.search("Test")
+    end
+  end
+
+  test "search raises AuthenticationError when login fails" do
+    VCR.turned_off do
+      stub_zlibrary_login_all_fail
+
+      assert_raises ZLibraryClient::AuthenticationError do
+        ZLibraryClient.search("Test")
+      end
+    end
+  end
+
+  test "search passes file type extensions" do
+    VCR.turned_off do
+      stub_zlibrary_login_success
+      stub_request(:post, "https://z-library.bz/eapi/book/search")
+        .with { |req| req.body.include?("extensions%5B%5D=epub") }
+        .to_return(
+          status: 200,
+          body: { success: 1, books: [] }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      ZLibraryClient.search("Test", file_types: %w[epub])
+
+      assert_requested(:post, "https://z-library.bz/eapi/book/search")
+    end
+  end
+
   private
 
   def stub_zlibrary_login_success
@@ -99,5 +170,28 @@ class ZLibraryClientTest < ActiveSupport::TestCase
       stub_request(:post, "https://#{domain}/eapi/user/login")
         .to_return(status: 500, body: "Server Error")
     end
+  end
+
+  def stub_zlibrary_search_success
+    stub_request(:post, "https://z-library.bz/eapi/book/search")
+      .to_return(
+        status: 200,
+        body: {
+          success: 1,
+          books: [
+            {
+              id: 999,
+              hash: "deadbeef",
+              name: "Test Book Title",
+              author: "Test Author",
+              year: "2023",
+              extension: "epub",
+              filesize: "5452595",
+              language: "english"
+            }
+          ]
+        }.to_json,
+        headers: { "Content-Type" => "application/json" }
+      )
   end
 end
