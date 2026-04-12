@@ -26,6 +26,12 @@ class AnnaArchiveClient
     end
   end
 
+  # Circuit breaker state per mirror (class-level, in-memory)
+  CIRCUIT_FAILURE_THRESHOLD = 3
+  CIRCUIT_COOLDOWN_SECONDS = 300 # 5 minutes
+
+  @circuit_breakers = {}
+
   class << self
     # Check if Anna's Archive is enabled for search (no API key needed)
     def configured?
@@ -35,6 +41,10 @@ class AnnaArchiveClient
     # Check if paid API key is available for fast downloads
     def has_api_key?
       SettingsService.configured?(:anna_archive_api_key)
+    end
+
+    def reset_circuit_breakers!
+      @circuit_breakers = {}
     end
 
     # Search for books via HTML scraping
@@ -101,13 +111,20 @@ class AnnaArchiveClient
 
       last_error = nil
       mirrors.each do |mirror|
+        if circuit_open?(mirror[:name])
+          Rails.logger.info "[AnnaArchiveClient] Skipping #{mirror[:name]} (circuit breaker open)"
+          next
+        end
+
         begin
           url = resolve_mirror_download(mirror)
           if url.present?
+            record_mirror_success(mirror[:name])
             Rails.logger.info "[AnnaArchiveClient] Got free download URL via #{mirror[:name]}: #{url.truncate(100)}"
             return url
           end
         rescue => e
+          record_mirror_failure(mirror[:name])
           Rails.logger.warn "[AnnaArchiveClient] Mirror #{mirror[:name]} failed: #{e.message}"
           last_error = e
         end
@@ -162,6 +179,35 @@ class AnnaArchiveClient
       unless configured?
         raise NotConfiguredError, "Anna's Archive is not configured or enabled"
       end
+    end
+
+    def circuit_open?(mirror_name)
+      state = @circuit_breakers[mirror_name]
+      return false unless state
+      return false if state[:failures] < CIRCUIT_FAILURE_THRESHOLD
+
+      # Check if cooldown has expired
+      if state[:open_until] && Time.current > state[:open_until]
+        @circuit_breakers.delete(mirror_name)
+        return false
+      end
+
+      true
+    end
+
+    def record_mirror_failure(mirror_name)
+      @circuit_breakers[mirror_name] ||= { failures: 0, open_until: nil }
+      state = @circuit_breakers[mirror_name]
+      state[:failures] += 1
+
+      if state[:failures] >= CIRCUIT_FAILURE_THRESHOLD
+        state[:open_until] = Time.current + CIRCUIT_COOLDOWN_SECONDS
+        Rails.logger.warn "[AnnaArchiveClient] Circuit breaker OPEN for #{mirror_name} (#{CIRCUIT_COOLDOWN_SECONDS}s cooldown)"
+      end
+    end
+
+    def record_mirror_success(mirror_name)
+      @circuit_breakers.delete(mirror_name)
     end
 
     def connection

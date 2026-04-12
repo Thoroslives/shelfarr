@@ -261,6 +261,40 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "circuit breaker skips mirror after consecutive failures" do
+    AnnaArchiveClient.reset_circuit_breakers!
+
+    3.times { AnnaArchiveClient.send(:record_mirror_failure, :libgen) }
+
+    assert AnnaArchiveClient.send(:circuit_open?, :libgen), "Circuit should be open after 3 failures"
+
+    AnnaArchiveClient.reset_circuit_breakers!
+  end
+
+  test "circuit breaker resets on success" do
+    AnnaArchiveClient.reset_circuit_breakers!
+
+    2.times { AnnaArchiveClient.send(:record_mirror_failure, :libgen) }
+    AnnaArchiveClient.send(:record_mirror_success, :libgen)
+
+    assert_not AnnaArchiveClient.send(:circuit_open?, :libgen), "Circuit should be closed after success"
+
+    AnnaArchiveClient.reset_circuit_breakers!
+  end
+
+  test "circuit breaker re-enables mirror after cooldown" do
+    AnnaArchiveClient.reset_circuit_breakers!
+
+    3.times { AnnaArchiveClient.send(:record_mirror_failure, :libgen) }
+    assert AnnaArchiveClient.send(:circuit_open?, :libgen)
+
+    travel 6.minutes do
+      assert_not AnnaArchiveClient.send(:circuit_open?, :libgen), "Circuit should close after cooldown"
+    end
+
+    AnnaArchiveClient.reset_circuit_breakers!
+  end
+
   private
 
   def stub_flaresolverr_with_search_results
