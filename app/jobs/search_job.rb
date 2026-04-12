@@ -16,7 +16,7 @@ class SearchJob < ApplicationJob
     # Check if any search sources are configured
     indexer_available = IndexerClient.configured?
     anna_available = AnnaArchiveClient.configured? && request.book.ebook?
-    zlib_available = ::ZLibraryClient.configured? && request.book.ebook?
+    zlib_available = ZLibraryClient.configured? && request.book.ebook?
 
     unless indexer_available || anna_available || zlib_available
       Rails.logger.error "[SearchJob] No search sources configured"
@@ -72,7 +72,7 @@ class SearchJob < ApplicationJob
     rescue AnnaArchiveClient::Error => e
       Rails.logger.error "[SearchJob] Anna's Archive error for request ##{request.id}: #{e.message}"
       # Non-fatal - continue if Prowlarr had results
-    rescue ::ZLibraryClient::Error => e
+    rescue ZLibraryClient::Error => e
       Rails.logger.error "[SearchJob] Z-Library error for request ##{request.id}: #{e.message}"
     end
   end
@@ -140,12 +140,12 @@ class SearchJob < ApplicationJob
     language = request.effective_language
     Rails.logger.debug "[SearchJob] Searching Z-Library for: #{query} (language: #{language})"
 
-    results = ::ZLibraryClient.search(query, language: language)
+    results = ZLibraryClient.search(query, language: language)
 
     results.map do |r|
       { result: r, source: SearchResult::SOURCE_ZLIBRARY }
     end
-  rescue ::ZLibraryClient::Error => e
+  rescue ZLibraryClient::Error => e
     Rails.logger.warn "[SearchJob] Z-Library search failed: #{e.message}"
     []
   end

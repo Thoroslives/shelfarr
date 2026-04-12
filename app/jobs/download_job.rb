@@ -65,7 +65,7 @@ class DownloadJob < ApplicationJob
       track_request_event(download.request, "dispatch_failed", download: download, message: e.message, level: :error)
       download.update!(status: :failed)
       download.request.mark_for_attention!("Anna's Archive error: #{e.message}")
-    rescue ::ZLibraryClient::Error => e
+    rescue ZLibraryClient::Error => e
       Rails.logger.error "[DownloadJob] Z-Library error for download ##{download.id}: #{e.message}"
       track_request_event(download.request, "dispatch_failed", download: download, message: e.message, level: :error)
       download.update!(status: :failed)
@@ -99,7 +99,7 @@ class DownloadJob < ApplicationJob
     id, hash = search_result.guid.split(":", 2)
     Rails.logger.info "[DownloadJob] Fetching download URL from Z-Library for book #{id}"
 
-    download_url = ::ZLibraryClient.get_download_url(id: id, hash: hash)
+    download_url = ZLibraryClient.get_download_url(id: id, hash: hash)
     Rails.logger.info "[DownloadJob] Got Z-Library download URL: #{download_url.truncate(100)}"
 
     handle_direct_http_download(download, search_result, download_url)
