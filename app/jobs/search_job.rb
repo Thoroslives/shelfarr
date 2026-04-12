@@ -16,7 +16,7 @@ class SearchJob < ApplicationJob
     # Check if any search sources are configured
     indexer_available = IndexerClient.configured?
     anna_available = AnnaArchiveClient.configured? && request.book.ebook?
-    zlib_available = ZLibraryClient.configured? && request.book.ebook?
+    zlib_available = !anna_available && ZLibraryClient.configured? && request.book.ebook?
 
     unless indexer_available || anna_available || zlib_available
       Rails.logger.error "[SearchJob] No search sources configured"
