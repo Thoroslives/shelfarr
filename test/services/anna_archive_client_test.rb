@@ -245,6 +245,22 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "get_free_download_url falls back to IPFS when other mirrors fail" do
+    VCR.turned_off do
+      stub_anna_md5_page_with_ipfs
+      # LibGen fails
+      stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+        .to_return(status: 500, body: "Server Error")
+      # IPFS responds
+      stub_request(:head, "https://ipfs.io/ipfs/bafykbzaceabc123")
+        .to_return(status: 200, headers: { "Content-Type" => "application/epub+zip" })
+
+      url = AnnaArchiveClient.get_free_download_url("abc123def456")
+
+      assert_equal "https://ipfs.io/ipfs/bafykbzaceabc123", url
+    end
+  end
+
   private
 
   def stub_flaresolverr_with_search_results
@@ -387,6 +403,25 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     HTML
 
     stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+      .to_return(status: 200, body: html)
+  end
+
+  def stub_anna_md5_page_with_ipfs
+    html = <<~HTML
+      <html>
+        <body>
+          <div id="md5-panel-downloads">
+            <ul>
+              <li><a href="/slow_download/abc123def456/0/0">Slow Server</a></li>
+              <li><a href="https://libgen.li/ads.php?md5=abc123def456">Libgen.li</a></li>
+              <li><a href="https://ipfs.io/ipfs/bafykbzaceabc123">IPFS Gateway</a></li>
+            </ul>
+          </div>
+        </body>
+      </html>
+    HTML
+
+    stub_request(:get, /annas-archive\.org\/md5\/abc123def456/)
       .to_return(status: 200, body: html)
   end
 
