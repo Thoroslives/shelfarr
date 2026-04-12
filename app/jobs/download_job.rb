@@ -229,9 +229,10 @@ class DownloadJob < ApplicationJob
 
     file_size = File.size(path)
 
-    # Check magic bytes first
-    magic = File.binread(path, 4)
-    head = File.binread(path, 200).downcase
+    # Single read for both magic byte and HTML checks
+    raw_head = File.binread(path, 200)
+    magic = raw_head[0, 4]
+    head = raw_head.downcase
 
     # Reject HTML error pages regardless of size
     if head.include?("<html") || head.include?("<!doctype")

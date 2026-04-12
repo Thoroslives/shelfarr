@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "nokogiri"
+require "faraday/follow_redirects"
+
 # Client for interacting with Anna's Archive
 # Search via HTML scraping, downloads via member API
 class AnnaArchiveClient
@@ -29,8 +32,10 @@ class AnnaArchiveClient
   # Circuit breaker state per mirror (class-level, in-memory)
   CIRCUIT_FAILURE_THRESHOLD = 3
   CIRCUIT_COOLDOWN_SECONDS = 300 # 5 minutes
+  ZLIB_AUTH_TTL_SECONDS = 1800 # 30 minutes
 
   @circuit_breakers = {}
+  @zlib_auth_cache = nil
 
   class << self
     # Check if Anna's Archive is enabled for search (no API key needed)
@@ -45,6 +50,7 @@ class AnnaArchiveClient
 
     def reset_circuit_breakers!
       @circuit_breakers = {}
+      @zlib_auth_cache = nil
     end
 
     # Search for books via HTML scraping
@@ -222,8 +228,6 @@ class AnnaArchiveClient
 
     # Extract mirror links from the MD5 page download panel
     def extract_mirror_links(html)
-      require "nokogiri"
-
       doc = Nokogiri::HTML(html)
       panel = doc.at_css("#md5-panel-downloads")
       return [] unless panel
@@ -337,6 +341,11 @@ class AnnaArchiveClient
     end
 
     def zlibrary_login
+      # Return cached auth if still valid
+      if @zlib_auth_cache && @zlib_auth_cache[:expires_at] > Time.current
+        return @zlib_auth_cache[:auth]
+      end
+
       email = SettingsService.get(:zlibrary_email)
       password = SettingsService.get(:zlibrary_password)
 
@@ -355,11 +364,13 @@ class AnnaArchiveClient
           data = JSON.parse(response.body)
           if data["success"] == 1
             Rails.logger.info "[AnnaArchiveClient] Z-Library login successful via #{domain}"
-            return {
+            auth = {
               remix_userid: data.dig("user", "remix_userid")&.to_s,
               remix_userkey: data.dig("user", "remix_userkey")&.to_s,
               domain: domain
             }
+            @zlib_auth_cache = { auth: auth, expires_at: Time.current + ZLIB_AUTH_TTL_SECONDS }
+            return auth
           end
         rescue JSON::ParserError, Faraday::Error => e
           Rails.logger.debug "[AnnaArchiveClient] Z-Library login failed on #{domain}: #{e.message}"
@@ -430,8 +441,6 @@ class AnnaArchiveClient
     end
 
     def mirror_connection
-      require "faraday/follow_redirects"
-
       @mirror_connection ||= Faraday.new do |f|
         f.request :url_encoded
         f.response :follow_redirects
@@ -466,8 +475,6 @@ class AnnaArchiveClient
     end
 
     def parse_search_results(html, limit)
-      require "nokogiri"
-
       doc = Nokogiri::HTML(html)
       results = []
 
