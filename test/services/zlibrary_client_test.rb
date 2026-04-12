@@ -94,7 +94,7 @@ class ZLibraryClientTest < ActiveSupport::TestCase
       assert_equal "Test Book Title", result.title
       assert_equal "Test Author", result.author
       assert_equal "epub", result.file_type
-      assert_equal "5.2 MB", result.file_size
+      assert_equal 5452595, result.file_size
       assert_equal 2023, result.year
       assert_equal "english", result.language
     end

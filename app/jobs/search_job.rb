@@ -219,7 +219,7 @@ class SearchJob < ApplicationJob
 
     # Use find_or_create_by to handle duplicate MD5s in Anna's Archive results
     request.search_results.find_or_create_by!(guid: result.md5) do |sr|
-      sr.title = build_anna_title(result)
+      sr.title = build_ebook_source_title(result)
       sr.indexer = "Anna's Archive"
       sr.size_bytes = size_bytes
       sr.seeders = nil  # N/A for Anna's Archive
@@ -235,12 +235,10 @@ class SearchJob < ApplicationJob
 
   def save_zlibrary_result(request, result)
     guid = "#{result.id}:#{result.hash}"
-    size_bytes = parse_size_to_bytes(result.file_size)
-
     request.search_results.find_or_create_by!(guid: guid) do |sr|
-      sr.title = build_zlibrary_title(result)
+      sr.title = build_ebook_source_title(result)
       sr.indexer = "Z-Library"
-      sr.size_bytes = size_bytes
+      sr.size_bytes = result.file_size
       sr.seeders = nil
       sr.leechers = nil
       sr.download_url = nil
@@ -252,16 +250,7 @@ class SearchJob < ApplicationJob
     end
   end
 
-  def build_zlibrary_title(result)
-    parts = []
-    parts << result.title if result.title.present?
-    parts << "- #{result.author}" if result.author.present? && result.author != "Unknown"
-    parts << "[#{result.file_type.upcase}]" if result.file_type.present?
-    parts << "(#{result.year})" if result.year.present?
-    parts.join(" ")
-  end
-
-  def build_anna_title(result)
+  def build_ebook_source_title(result)
     parts = []
     parts << result.title if result.title.present?
     parts << "- #{result.author}" if result.author.present?

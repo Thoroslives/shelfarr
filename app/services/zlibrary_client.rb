@@ -17,7 +17,8 @@ class ZLibraryClient
     end
 
     def size_human
-      file_size
+      return nil unless file_size
+      ActiveSupport::NumberHelper.number_to_human_size(file_size)
     end
   end
 
@@ -28,8 +29,8 @@ class ZLibraryClient
 
   class << self
     def configured?
-      SettingsService.get(:zlibrary_email).present? &&
-        SettingsService.get(:zlibrary_password).present?
+      SettingsService.configured?(:zlibrary_email) &&
+        SettingsService.configured?(:zlibrary_password)
     end
 
     def reset_auth_cache!
@@ -160,27 +161,12 @@ class ZLibraryClient
           id: id,
           hash: hash,
           title: book["name"].presence || book["title"].presence || "Unknown",
-          author: book["author"].presence || "Unknown",
+          author: book["author"].presence,
           year: book["year"].to_i.nonzero?,
           file_type: book["extension"]&.downcase,
-          file_size: format_file_size(book["filesize"]),
+          file_size: book["filesize"].to_i.nonzero?,
           language: book["language"]
         )
-      end
-    end
-
-    def format_file_size(bytes_string)
-      bytes = bytes_string.to_i
-      return nil if bytes <= 0
-
-      if bytes >= 1_073_741_824
-        "#{(bytes / 1_073_741_824.0).round(1)} GB"
-      elsif bytes >= 1_048_576
-        "#{(bytes / 1_048_576.0).round(1)} MB"
-      elsif bytes >= 1024
-        "#{(bytes / 1024.0).round(1)} KB"
-      else
-        "#{bytes} B"
       end
     end
 

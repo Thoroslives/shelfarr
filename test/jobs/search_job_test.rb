@@ -403,7 +403,7 @@ class SearchJobTest < ActiveJob::TestCase
       author: "Test Author",
       year: 2023,
       file_type: "epub",
-      file_size: "5.2 MB",
+      file_size: 5452595,
       language: "english"
     )
 
