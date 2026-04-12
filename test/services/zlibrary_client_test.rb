@@ -151,6 +151,41 @@ class ZLibraryClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "get_download_url returns direct URL from eAPI" do
+    VCR.turned_off do
+      stub_zlibrary_login_success
+      stub_zlibrary_download_success
+
+      url = ZLibraryClient.get_download_url(id: "999", hash: "deadbeef")
+
+      assert_equal "https://download.z-library.bz/dl/book999/file.epub", url
+    end
+  end
+
+  test "get_download_url raises Error when no download link" do
+    VCR.turned_off do
+      stub_zlibrary_login_success
+      stub_request(:get, "https://z-library.bz/eapi/book/999/deadbeef/file")
+        .to_return(
+          status: 200,
+          body: { success: 0, error: "Book not found" }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      assert_raises ZLibraryClient::Error do
+        ZLibraryClient.get_download_url(id: "999", hash: "deadbeef")
+      end
+    end
+  end
+
+  test "get_download_url raises NotConfiguredError when not configured" do
+    SettingsService.set(:zlibrary_email, "")
+
+    assert_raises ZLibraryClient::NotConfiguredError do
+      ZLibraryClient.get_download_url(id: "999", hash: "deadbeef")
+    end
+  end
+
   private
 
   def stub_zlibrary_login_success
@@ -170,6 +205,22 @@ class ZLibraryClientTest < ActiveSupport::TestCase
       stub_request(:post, "https://#{domain}/eapi/user/login")
         .to_return(status: 500, body: "Server Error")
     end
+  end
+
+  def stub_zlibrary_download_success
+    stub_request(:get, "https://z-library.bz/eapi/book/999/deadbeef/file")
+      .to_return(
+        status: 200,
+        body: {
+          success: 1,
+          file: {
+            description: "Test Book Title",
+            extension: "epub",
+            downloadLink: "https://download.z-library.bz/dl/book999/file.epub"
+          }
+        }.to_json,
+        headers: { "Content-Type" => "application/json" }
+      )
   end
 
   def stub_zlibrary_search_success

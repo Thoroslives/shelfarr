@@ -71,6 +71,40 @@ class ZLibraryClient
       raise ConnectionError, "Failed to connect to Z-Library: #{e.message}"
     end
 
+    # Get direct download URL for a book via eAPI
+    # @param id [String] Z-Library book ID
+    # @param hash [String] Z-Library book hash
+    # @return [String] Direct download URL
+    def get_download_url(id:, hash:)
+      ensure_configured!
+
+      auth = login
+      raise AuthenticationError, "Z-Library login failed" unless auth
+
+      Rails.logger.info "[ZLibraryClient] Fetching download URL for book #{id}"
+
+      url = "https://#{auth[:domain]}/eapi/book/#{id}/#{hash}/file"
+      response = connection.get(url) do |req|
+        req.headers["Cookie"] = "remix_userid=#{auth[:remix_userid]}; remix_userkey=#{auth[:remix_userkey]}"
+      end
+
+      raise ConnectionError, "Download request failed with status #{response.status}" unless response.status == 200
+
+      data = JSON.parse(response.body)
+      download_link = data.dig("file", "downloadLink")
+
+      if download_link.blank?
+        raise Error, "No download link returned for book #{id}"
+      end
+
+      Rails.logger.info "[ZLibraryClient] Got download link: #{download_link.truncate(100)}"
+      download_link
+    rescue JSON::ParserError => e
+      raise Error, "Failed to parse download response: #{e.message}"
+    rescue Faraday::ConnectionFailed, Faraday::TimeoutError, Faraday::SSLError => e
+      raise ConnectionError, "Failed to connect to Z-Library: #{e.message}"
+    end
+
     private
 
     def login
