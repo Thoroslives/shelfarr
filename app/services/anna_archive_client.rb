@@ -249,9 +249,25 @@ class AnnaArchiveClient
     end
 
     def resolve_zlibrary_download(url)
-      # Z-Library download flow - needs research during implementation
-      # May require fetch_with_protection_bypass if DDoS-Guard protected
-      Rails.logger.info "[AnnaArchiveClient] Z-Library resolver not yet implemented, skipping: #{url}"
+      unless zlibrary_configured?
+        Rails.logger.info "[AnnaArchiveClient] Z-Library not configured, skipping: #{url}"
+        return nil
+      end
+
+      Rails.logger.info "[AnnaArchiveClient] Resolving Z-Library download: #{url}"
+
+      # Step 1: Login to get remix tokens and discover domains
+      zlib_auth = zlibrary_login
+      return nil unless zlib_auth
+
+      # Step 2: Follow the AA link to find the book page (extract book ID and hash)
+      book_info = zlibrary_extract_book_info(url, zlib_auth)
+      return nil unless book_info
+
+      # Step 3: Get download link via eAPI
+      zlibrary_get_download_link(book_info, zlib_auth)
+    rescue => e
+      Rails.logger.warn "[AnnaArchiveClient] Z-Library resolver failed: #{e.message}"
       nil
     end
 
@@ -267,6 +283,104 @@ class AnnaArchiveClient
       end
     rescue Faraday::ConnectionFailed, Faraday::TimeoutError => e
       raise FreeDownloadError, "IPFS gateway unreachable: #{e.message}"
+    end
+
+    def zlibrary_configured?
+      SettingsService.get(:zlibrary_email).present? &&
+        SettingsService.get(:zlibrary_password).present?
+    end
+
+    def zlibrary_login
+      email = SettingsService.get(:zlibrary_email)
+      password = SettingsService.get(:zlibrary_password)
+
+      # Try known Z-Library domains for eAPI login
+      domains = %w[z-library.bz 1lib.sk z-lib.fm z-lib.sk]
+
+      domains.each do |domain|
+        begin
+          response = mirror_connection.post("https://#{domain}/eapi/user/login") do |req|
+            req.headers["Content-Type"] = "application/x-www-form-urlencoded"
+            req.body = URI.encode_www_form(email: email, password: password)
+          end
+
+          next unless response.status == 200
+
+          data = JSON.parse(response.body)
+          if data["success"] == 1
+            Rails.logger.info "[AnnaArchiveClient] Z-Library login successful via #{domain}"
+            return {
+              remix_userid: data.dig("user", "remix_userid")&.to_s,
+              remix_userkey: data.dig("user", "remix_userkey")&.to_s,
+              domain: domain
+            }
+          end
+        rescue JSON::ParserError, Faraday::Error => e
+          Rails.logger.debug "[AnnaArchiveClient] Z-Library login failed on #{domain}: #{e.message}"
+          next
+        end
+      end
+
+      Rails.logger.warn "[AnnaArchiveClient] Z-Library login failed on all domains"
+      nil
+    end
+
+    def zlibrary_extract_book_info(aa_url, auth)
+      # The URL from AA's MD5 page looks like https://z-lib.gd/md5/abc123
+      # Following it (when logged in) redirects to /book/{id}/{hash}
+      # We need to extract the book ID and hash
+
+      response = mirror_connection.get(aa_url) do |req|
+        req.headers["Cookie"] = "remix_userid=#{auth[:remix_userid]}; remix_userkey=#{auth[:remix_userkey]}"
+      end
+
+      # Check if we got redirected to a book page
+      final_url = response.env.url.to_s
+      book_match = final_url.match(%r{/book/(\d+)/([a-f0-9]+)}i)
+
+      unless book_match
+        # Try parsing the response body for book links
+        require "nokogiri"
+        doc = Nokogiri::HTML(response.body)
+        book_link = doc.at_css("a[href*='/book/']")
+        if book_link
+          book_match = book_link["href"].match(%r{/book/(\d+)/([a-f0-9]+)}i)
+        end
+      end
+
+      unless book_match
+        Rails.logger.warn "[AnnaArchiveClient] Could not extract Z-Library book ID from: #{aa_url}"
+        return nil
+      end
+
+      { id: book_match[1], hash: book_match[2] }
+    end
+
+    def zlibrary_get_download_link(book_info, auth)
+      domain = auth[:domain]
+      book_id = book_info[:id]
+      book_hash = book_info[:hash]
+
+      url = "https://#{domain}/eapi/book/#{book_id}/#{book_hash}/file"
+      response = mirror_connection.get(url) do |req|
+        req.headers["Cookie"] = "remix_userid=#{auth[:remix_userid]}; remix_userkey=#{auth[:remix_userkey]}"
+      end
+
+      return nil unless response.status == 200
+
+      data = JSON.parse(response.body)
+      download_link = data["downloadLink"]
+
+      if download_link.present?
+        Rails.logger.info "[AnnaArchiveClient] Got Z-Library download link: #{download_link.truncate(100)}"
+        download_link
+      else
+        Rails.logger.warn "[AnnaArchiveClient] Z-Library returned no download link for book #{book_id}"
+        nil
+      end
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[AnnaArchiveClient] Z-Library download response parse error: #{e.message}"
+      nil
     end
 
     def mirror_connection

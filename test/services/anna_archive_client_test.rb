@@ -207,6 +207,44 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
     end
   end
 
+  test "get_free_download_url uses Z-Library when LibGen fails and Z-Library is configured" do
+    VCR.turned_off do
+      SettingsService.set(:zlibrary_email, "test@example.com")
+      SettingsService.set(:zlibrary_password, "testpass")
+
+      stub_anna_md5_page_with_mirrors
+      # LibGen fails
+      stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
+        .to_return(status: 500, body: "Server Error")
+      # Z-Library login succeeds
+      stub_zlibrary_login
+      # Z-Library URL redirects to book page
+      stub_zlibrary_book_redirect
+      # Z-Library eAPI returns download link
+      stub_zlibrary_download_api
+
+      url = AnnaArchiveClient.get_free_download_url("abc123def456")
+
+      assert_equal "https://download.z-library.bz/dl/book123/file.epub", url
+
+      SettingsService.set(:zlibrary_email, "")
+      SettingsService.set(:zlibrary_password, "")
+    end
+  end
+
+  test "get_free_download_url skips Z-Library when not configured" do
+    VCR.turned_off do
+      stub_anna_md5_page_with_mirrors
+      stub_libgen_ads_page
+
+      # Z-Library not configured (no email/password)
+      url = AnnaArchiveClient.get_free_download_url("abc123def456")
+
+      # Should use LibGen since Z-Library is not configured
+      assert_match(/libgen/, url)
+    end
+  end
+
   private
 
   def stub_flaresolverr_with_search_results
@@ -350,5 +388,39 @@ class AnnaArchiveClientTest < ActiveSupport::TestCase
 
     stub_request(:get, "https://libgen.li/ads.php?md5=abc123def456")
       .to_return(status: 200, body: html)
+  end
+
+  def stub_zlibrary_login
+    stub_request(:post, "https://z-library.bz/eapi/user/login")
+      .to_return(
+        status: 200,
+        body: {
+          success: 1,
+          user: {
+            remix_userid: "12345",
+            remix_userkey: "abcdef123456"
+          }
+        }.to_json,
+        headers: { "Content-Type" => "application/json" }
+      )
+  end
+
+  def stub_zlibrary_book_redirect
+    stub_request(:get, "https://z-lib.gd/md5/abc123def456")
+      .to_return(
+        status: 200,
+        body: '<html><body><a href="/book/999/deadbeef">Book Page</a></body></html>'
+      )
+  end
+
+  def stub_zlibrary_download_api
+    stub_request(:get, "https://z-library.bz/eapi/book/999/deadbeef/file")
+      .to_return(
+        status: 200,
+        body: {
+          downloadLink: "https://download.z-library.bz/dl/book123/file.epub"
+        }.to_json,
+        headers: { "Content-Type" => "application/json" }
+      )
   end
 end

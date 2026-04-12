@@ -77,6 +77,10 @@ class SettingsService
     anna_archive_api_key: { type: "string", default: "", category: "anna_archive", description: "Optional - member API key for faster downloads (requires donation)" },
     flaresolverr_url: { type: "string", default: "", category: "anna_archive", description: "FlareSolverr URL for bypassing DDoS protection (e.g., http://flaresolverr:8191)" },
 
+    # Z-Library (used as mirror fallback for ebook downloads)
+    zlibrary_email: { type: "string", default: "", category: "anna_archive", description: "Z-Library account email for mirror downloads" },
+    zlibrary_password: { type: "string", default: "", category: "anna_archive", description: "Z-Library account password for mirror downloads" },
+
     # Hardcover Integration
     hardcover_api_token: { type: "string", default: "", category: "hardcover", description: "API token from Hardcover account settings (hardcover.app/account/api)" },
     metadata_source: { type: "string", default: "auto", category: "hardcover", description: "Primary metadata source: auto (Hardcover first, OpenLibrary fallback), hardcover, or openlibrary" },
