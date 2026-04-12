@@ -17,8 +17,7 @@ class ZLibraryClient
     end
 
     def size_human
-      return nil unless file_size
-      ActiveSupport::NumberHelper.number_to_human_size(file_size)
+      file_size
     end
   end
 
