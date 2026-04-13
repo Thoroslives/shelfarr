@@ -62,32 +62,15 @@ class DownloadClient < ApplicationRecord
   end
 
   def preferred_for_indexer?(indexer_name)
-    return false if preferred_indexers.blank? || indexer_name.blank?
+    return false if indexer_name.blank?
 
-    names = preferred_indexers.split(",").map(&:strip).reject(&:blank?)
-    names.any? { |name| name.casecmp(indexer_name.strip) == 0 }
+    preferred_indexer_list.any? { |name| name.casecmp(indexer_name.strip) == 0 }
   end
 
   def preferred_indexer_list
     return [] if preferred_indexers.blank?
 
     preferred_indexers.split(",").map(&:strip).reject(&:blank?)
-  end
-
-  class << self
-    def indexer_assignments(exclude_client_id: nil)
-      scope = preferred_indexers_present
-      scope = scope.where.not(id: exclude_client_id) if exclude_client_id
-      scope.each_with_object({}) do |client, map|
-        client.preferred_indexer_list.each { |name| map[name.downcase] = client.name }
-      end
-    end
-
-    private
-
-    def preferred_indexers_present
-      where.not(preferred_indexers: [nil, ""])
-    end
   end
 
   def requires_authentication?
@@ -98,10 +81,21 @@ class DownloadClient < ApplicationRecord
     qbittorrent? || decypharr?
   end
 
+  class << self
+    def indexer_assignments(exclude_client_id: nil)
+      scope = where.not(preferred_indexers: [nil, ""])
+      scope = scope.where.not(id: exclude_client_id) if exclude_client_id
+      scope.each_with_object({}) do |client, map|
+        client.preferred_indexer_list.each { |name| map[name.downcase] = client.name }
+      end
+    end
+  end
+
   private
 
   def preferred_indexers_not_claimed_by_other_clients
     return if preferred_indexers.blank?
+    return unless preferred_indexers_changed?
 
     assignments = self.class.indexer_assignments(exclude_client_id: id)
     conflicts = preferred_indexer_list.select { |name| assignments.key?(name.downcase) }
