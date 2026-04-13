@@ -154,6 +154,44 @@ class DownloadClientTest < ActiveSupport::TestCase
     assert_not_equal "secret123", client.password_before_type_cast
   end
 
+  test "preferred_for_indexer? returns true for exact match" do
+    client = DownloadClient.new(preferred_indexers: "MyAnonaMouse")
+    assert client.preferred_for_indexer?("MyAnonaMouse")
+  end
+
+  test "preferred_for_indexer? is case insensitive" do
+    client = DownloadClient.new(preferred_indexers: "MyAnonaMouse")
+    assert client.preferred_for_indexer?("myanonymouse")
+  end
+
+  test "preferred_for_indexer? matches any in comma-separated list" do
+    client = DownloadClient.new(preferred_indexers: "MyAnonaMouse, IPTorrents, TorrentLeech")
+    assert client.preferred_for_indexer?("IPTorrents")
+  end
+
+  test "preferred_for_indexer? returns false for non-matching indexer" do
+    client = DownloadClient.new(preferred_indexers: "MyAnonaMouse")
+    refute client.preferred_for_indexer?("IPTorrents")
+  end
+
+  test "preferred_for_indexer? returns false for blank values" do
+    client = DownloadClient.new(preferred_indexers: nil)
+    refute client.preferred_for_indexer?("MyAnonaMouse")
+
+    client.preferred_indexers = ""
+    refute client.preferred_for_indexer?("MyAnonaMouse")
+
+    client.preferred_indexers = "MyAnonaMouse"
+    refute client.preferred_for_indexer?(nil)
+    refute client.preferred_for_indexer?("")
+  end
+
+  test "preferred_for_indexer? handles whitespace in list" do
+    client = DownloadClient.new(preferred_indexers: " MyAnonaMouse , IPTorrents ")
+    assert client.preferred_for_indexer?("MyAnonaMouse")
+    assert client.preferred_for_indexer?("IPTorrents")
+  end
+
   test "encrypts api_key" do
     client = DownloadClient.create!(
       name: "Test",
