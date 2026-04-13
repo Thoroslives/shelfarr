@@ -83,7 +83,7 @@ class DownloadClient < ApplicationRecord
 
   class << self
     def indexer_assignments(exclude_client_id: nil)
-      scope = where.not(preferred_indexers: [nil, ""])
+      scope = enabled.torrent_clients.where.not(preferred_indexers: [nil, ""])
       scope = scope.where.not(id: exclude_client_id) if exclude_client_id
       scope.each_with_object({}) do |client, map|
         client.preferred_indexer_list.each { |name| map[name.downcase] = client.name }

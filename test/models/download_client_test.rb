@@ -235,6 +235,84 @@ class DownloadClientTest < ActiveSupport::TestCase
     assert_equal "qBit", assignments["iptorrents"]
   end
 
+  test "indexer_assignments ignores usenet clients" do
+    DownloadClient.create!(
+      name: "SAB",
+      client_type: "sabnzbd",
+      url: "http://localhost:8080",
+      api_key: "key",
+      preferred_indexers: "MyAnonaMouse"
+    )
+    qb = DownloadClient.create!(
+      name: "qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      preferred_indexers: "IPTorrents"
+    )
+
+    assignments = DownloadClient.indexer_assignments
+    assert_nil assignments["myanonamouse"]
+    assert_equal "qBit", assignments["iptorrents"]
+  end
+
+  test "indexer_assignments ignores disabled clients" do
+    DownloadClient.create!(
+      name: "Disabled qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      enabled: false,
+      preferred_indexers: "MyAnonaMouse"
+    )
+    DownloadClient.create!(
+      name: "Enabled qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      enabled: true,
+      preferred_indexers: "IPTorrents"
+    )
+
+    assignments = DownloadClient.indexer_assignments
+    assert_nil assignments["myanonamouse"]
+    assert_equal "Enabled qBit", assignments["iptorrents"]
+  end
+
+  test "disabled client does not block enabled client from claiming same indexer" do
+    DownloadClient.create!(
+      name: "Disabled qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      enabled: false,
+      preferred_indexers: "MyAnonaMouse"
+    )
+    enabled = DownloadClient.new(
+      name: "Enabled qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      enabled: true,
+      preferred_indexers: "MyAnonaMouse"
+    )
+
+    assert enabled.valid?
+  end
+
+  test "usenet client does not block torrent client from claiming same indexer" do
+    DownloadClient.create!(
+      name: "SAB",
+      client_type: "sabnzbd",
+      url: "http://localhost:8080",
+      api_key: "key",
+      preferred_indexers: "MyAnonaMouse"
+    )
+    qb = DownloadClient.new(
+      name: "qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      preferred_indexers: "MyAnonaMouse"
+    )
+
+    assert qb.valid?
+  end
+
   test "indexer_assignments excludes specified client" do
     client = DownloadClient.create!(
       name: "qBit",
