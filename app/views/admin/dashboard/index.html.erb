@@ -106,7 +106,7 @@
                 <%= health.status.titleize %>
               </span>
               <% if health.message.present? %>
-                <span class="text-xs text-gray-500 block mt-1"><%= health.message.truncate(40) %></span>
+                <span class="text-xs text-gray-500 block mt-1"><%= health.message %></span>
               <% end %>
             <% else %>
               <span class="px-2 py-1 rounded text-sm bg-gray-700 text-gray-400">Not checked</span>
