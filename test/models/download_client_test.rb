@@ -192,6 +192,61 @@ class DownloadClientTest < ActiveSupport::TestCase
     assert client.preferred_for_indexer?("IPTorrents")
   end
 
+  test "validates preferred_indexers not claimed by other clients" do
+    DownloadClient.create!(
+      name: "Client A",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      preferred_indexers: "MyAnonaMouse"
+    )
+    client_b = DownloadClient.new(
+      name: "Client B",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      preferred_indexers: "MyAnonaMouse"
+    )
+
+    refute client_b.valid?
+    assert_includes client_b.errors[:preferred_indexers].join, "already assigned"
+  end
+
+  test "allows same client to keep its own preferred_indexers on update" do
+    client = DownloadClient.create!(
+      name: "Client A",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      preferred_indexers: "MyAnonaMouse"
+    )
+    client.name = "Client A Renamed"
+
+    assert client.valid?
+  end
+
+  test "indexer_assignments returns map of indexer to client name" do
+    DownloadClient.create!(
+      name: "qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      preferred_indexers: "MyAnonaMouse, IPTorrents"
+    )
+    assignments = DownloadClient.indexer_assignments
+
+    assert_equal "qBit", assignments["myanonamouse"]
+    assert_equal "qBit", assignments["iptorrents"]
+  end
+
+  test "indexer_assignments excludes specified client" do
+    client = DownloadClient.create!(
+      name: "qBit",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      preferred_indexers: "MyAnonaMouse"
+    )
+    assignments = DownloadClient.indexer_assignments(exclude_client_id: client.id)
+
+    assert_empty assignments
+  end
+
   test "encrypts api_key" do
     client = DownloadClient.create!(
       name: "Test",

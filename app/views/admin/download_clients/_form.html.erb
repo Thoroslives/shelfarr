@@ -78,15 +78,16 @@
     <p class="mt-1 text-sm text-gray-500">Container path where completed downloads appear (e.g., /downloads). Leave blank to use global settings.</p>
   </div>
 
-  <div class="my-5" data-controller="indexer-preference"
-       data-indexer-preference-url-value="<%= available_indexers_admin_download_clients_path %>"
+  <div id="indexer_preference_fields" class="my-5 <%= 'hidden' if download_client.usenet_client? %>"
+       data-controller="indexer-preference"
+       data-indexer-preference-url-value="<%= available_indexers_admin_download_clients_path(client_id: download_client.id) %>"
        data-indexer-preference-current-value="<%= download_client.preferred_indexers %>">
     <%= form.label :preferred_indexers, "Indexer Preference", class: "block text-gray-300 font-medium" %>
     <%= form.hidden_field :preferred_indexers, data: { indexer_preference_target: "input" } %>
     <div data-indexer-preference-target="container" class="mt-2">
       <p class="text-sm text-gray-500">Loading indexers...</p>
     </div>
-    <p class="mt-1 text-sm text-gray-500">Optional. Downloads from selected indexers will prefer this client over the default priority order. Assign each indexer to only one client.</p>
+    <p class="mt-1 text-sm text-gray-500">Optional. Downloads from selected indexers will prefer this client over the default priority order.</p>
   </div>
 
   <div id="qbittorrent_fields" class="<%= 'hidden' unless download_client.qbittorrent? || download_client.new_record? %>">
@@ -126,17 +127,22 @@
     const authenticationFields = document.getElementById('authentication_fields');
     const sabnzbdFields = document.getElementById('sabnzbd_fields');
     const qbittorrentFields = document.getElementById('qbittorrent_fields');
+    const indexerPreferenceFields = document.getElementById('indexer_preference_fields');
 
     if (!clientTypeSelect || !authenticationFields || !sabnzbdFields || !qbittorrentFields) return;
 
     function toggleFields() {
       const type = clientTypeSelect.value;
+      const isUsenet = ['sabnzbd', 'nzbget'].includes(type);
       authenticationFields.classList.toggle(
         'hidden',
         !['qbittorrent', 'decypharr', 'nzbget', 'deluge', 'transmission'].includes(type)
       );
       sabnzbdFields.classList.toggle('hidden', type !== 'sabnzbd');
       qbittorrentFields.classList.toggle('hidden', type !== 'qbittorrent');
+      if (indexerPreferenceFields) {
+        indexerPreferenceFields.classList.toggle('hidden', isUsenet);
+      }
     }
 
     // Run on load to set initial state
