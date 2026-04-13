@@ -112,6 +112,61 @@ class Admin::DownloadClientsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "available_indexers returns empty array when no provider configured" do
+    IndexerClient.stub :configured?, false do
+      get available_indexers_admin_download_clients_url, as: :json
+
+      assert_response :success
+      body = JSON.parse(response.body)
+      assert_equal [], body
+    end
+  end
+
+  test "create persists preferred_indexers" do
+    VCR.turned_off do
+      stub_qbittorrent_connection("http://localhost:8081")
+
+      assert_enqueued_with(job: DownloadMonitorJob) do
+        post admin_download_clients_url, params: {
+          download_client: {
+            name: "Indexer Routed Client",
+            client_type: "qbittorrent",
+            url: "http://localhost:8081",
+            username: "admin",
+            password: "password",
+            category: "shelfarr",
+            enabled: "1",
+            preferred_indexers: "MyAnonaMouse,IPTorrents"
+          }
+        }
+      end
+
+      assert_redirected_to admin_download_clients_path
+
+      client = DownloadClient.find_by!(name: "Indexer Routed Client")
+      assert_equal "MyAnonaMouse,IPTorrents", client.preferred_indexers
+    end
+  end
+
+  test "update persists preferred_indexers" do
+    client = create_download_client
+
+    VCR.turned_off do
+      stub_qbittorrent_connection(client.url)
+
+      assert_enqueued_with(job: DownloadMonitorJob) do
+        patch admin_download_client_url(client), params: {
+          download_client: {
+            preferred_indexers: "TorrentLeech"
+          }
+        }
+      end
+
+      assert_redirected_to admin_download_clients_path
+      assert_equal "TorrentLeech", client.reload.preferred_indexers
+    end
+  end
+
   private
 
   def create_download_client

@@ -22,6 +22,7 @@ class DownloadClient < ApplicationRecord
     numericality: { only_integer: true, greater_than: 0 }
   validates :torrent_verification_wait_time,
     numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validate :preferred_indexers_not_claimed_by_other_clients
 
   scope :enabled, -> { where(enabled: true) }
   scope :by_priority, -> { order(priority: :asc) }
@@ -67,11 +68,46 @@ class DownloadClient < ApplicationRecord
     names.any? { |name| name.casecmp(indexer_name.strip) == 0 }
   end
 
+  def preferred_indexer_list
+    return [] if preferred_indexers.blank?
+
+    preferred_indexers.split(",").map(&:strip).reject(&:blank?)
+  end
+
+  class << self
+    def indexer_assignments(exclude_client_id: nil)
+      scope = preferred_indexers_present
+      scope = scope.where.not(id: exclude_client_id) if exclude_client_id
+      scope.each_with_object({}) do |client, map|
+        client.preferred_indexer_list.each { |name| map[name.downcase] = client.name }
+      end
+    end
+
+    private
+
+    def preferred_indexers_present
+      where.not(preferred_indexers: [nil, ""])
+    end
+  end
+
   def requires_authentication?
     qbittorrent? || decypharr? || nzbget? || deluge? || transmission?
   end
 
   def qbittorrent_compatible?
     qbittorrent? || decypharr?
+  end
+
+  private
+
+  def preferred_indexers_not_claimed_by_other_clients
+    return if preferred_indexers.blank?
+
+    assignments = self.class.indexer_assignments(exclude_client_id: id)
+    conflicts = preferred_indexer_list.select { |name| assignments.key?(name.downcase) }
+    return if conflicts.empty?
+
+    conflict_details = conflicts.map { |name| "#{name} (#{assignments[name.downcase]})" }
+    errors.add(:preferred_indexers, "contains indexers already assigned to other clients: #{conflict_details.join(', ')}")
   end
 end
