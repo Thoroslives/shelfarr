@@ -161,7 +161,7 @@ class DownloadClientTest < ActiveSupport::TestCase
 
   test "preferred_for_indexer? is case insensitive" do
     client = DownloadClient.new(preferred_indexers: "MyAnonaMouse")
-    assert client.preferred_for_indexer?("myanonymouse")
+    assert client.preferred_for_indexer?("myanonamouse")
   end
 
   test "preferred_for_indexer? matches any in comma-separated list" do
