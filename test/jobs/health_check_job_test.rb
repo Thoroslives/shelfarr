@@ -289,12 +289,9 @@ class HealthCheckJobTest < ActiveJob::TestCase
     end
   end
 
-  test "checks category folder under client download_path when set" do
+  test "does not require category folder when client download_path is set" do
     Dir.mktmpdir do |client_path|
       Dir.mktmpdir do |local_path|
-        # Category folder exists under client_path but NOT under local_path
-        FileUtils.mkdir_p(File.join(client_path, "shelfarr"))
-
         setup_download_paths(local_path)
         client = create_download_client(name: "Custom Path Client")
         client.update!(category: "shelfarr", download_path: client_path)
@@ -307,7 +304,29 @@ class HealthCheckJobTest < ActiveJob::TestCase
           health = SystemHealth.for_service("download_paths")
           assert health.healthy?
           assert_includes health.message, "accessible"
+          refute_includes health.message, "category folder"
         end
+      end
+    end
+  end
+
+  test "marks download_paths as degraded when client download_path does not exist" do
+    Dir.mktmpdir do |local_path|
+      missing_client_path = File.join(local_path, "missing-client-downloads")
+
+      setup_download_paths(local_path)
+      client = create_download_client(name: "Missing Custom Path Client")
+      client.update!(category: "shelfarr", download_path: missing_client_path)
+
+      VCR.turned_off do
+        stub_qbittorrent_auth_success
+
+        HealthCheckJob.perform_now(service: "download_paths")
+
+        health = SystemHealth.for_service("download_paths")
+        assert health.degraded?
+        assert_includes health.message, "configured download path"
+        assert_includes health.message, missing_client_path
       end
     end
   end
