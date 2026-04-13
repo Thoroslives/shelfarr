@@ -76,7 +76,15 @@ module Admin
 
     def available_indexers
       names = fetch_indexer_names
-      render json: names
+      exclude_id = params[:client_id].present? ? params[:client_id].to_i : nil
+      assignments = DownloadClient.indexer_assignments(exclude_client_id: exclude_id)
+
+      result = names.map do |name|
+        assigned_to = assignments[name.downcase]
+        { name: name, assigned_to: assigned_to }
+      end
+
+      render json: result
     end
 
     private
