@@ -65,6 +65,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_14_110000) do
     t.boolean "enabled", default: true, null: false
     t.string "name", null: false
     t.string "password"
+    t.string "preferred_indexers"
     t.integer "priority", default: 0, null: false
     t.integer "torrent_verification_max_attempts", default: 10, null: false
     t.integer "torrent_verification_wait_time", default: 2, null: false

@@ -47,6 +47,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, true
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal sab, selected
@@ -400,7 +401,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
       username: "admin",
       password: "password",
       priority: 0,
-      preferred_indexers: "myanonymouse"
+      preferred_indexers: "myanonamouse"
     )
 
     VCR.turned_off do
