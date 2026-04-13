@@ -60,6 +60,13 @@ class DownloadClient < ApplicationRecord
     sabnzbd? || nzbget?
   end
 
+  def preferred_for_indexer?(indexer_name)
+    return false if preferred_indexers.blank? || indexer_name.blank?
+
+    names = preferred_indexers.split(",").map(&:strip).reject(&:blank?)
+    names.any? { |name| name.casecmp(indexer_name.strip) == 0 }
+  end
+
   def requires_authentication?
     qbittorrent? || decypharr? || nzbget? || deluge? || transmission?
   end

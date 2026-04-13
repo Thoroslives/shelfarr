@@ -26,6 +26,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal qb, selected
@@ -77,6 +78,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal high_priority, selected
@@ -110,6 +112,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal working, selected
@@ -158,6 +161,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal deluge, selected
@@ -219,6 +223,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
 
       selected = DownloadClientSelector.for_download(search_result)
       assert_equal transmission, selected
@@ -261,6 +266,7 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
 
       search_result = Minitest::Mock.new
       search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
       search_result.expect :usenet?, false  # Called twice (select + download_type)
 
       error = assert_raises(DownloadClientSelector::NoClientAvailableError) do
@@ -287,6 +293,149 @@ class DownloadClientSelectorTest < ActiveSupport::TestCase
       DownloadClientSelector.for_download(search_result)
     end
     assert_includes error.message, "No torrent download client configured"
+  end
+
+  test "prefers indexer-matched client over higher priority" do
+    DownloadClient.create!(
+      name: "High Priority",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      username: "admin",
+      password: "password",
+      priority: 0
+    )
+    indexer_matched = DownloadClient.create!(
+      name: "Indexer Matched",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      username: "admin",
+      password: "password",
+      priority: 10,
+      preferred_indexers: "MyAnonaMouse"
+    )
+
+    VCR.turned_off do
+      stub_qbittorrent_connection("http://localhost:8080")
+      stub_qbittorrent_connection("http://localhost:9090")
+
+      search_result = Minitest::Mock.new
+      search_result.expect :usenet?, false
+      search_result.expect :indexer, "MyAnonaMouse"
+
+      selected = DownloadClientSelector.for_download(search_result)
+      assert_equal indexer_matched, selected
+    end
+  end
+
+  test "falls back to priority when no client matches indexer" do
+    priority_client = DownloadClient.create!(
+      name: "Priority Client",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      username: "admin",
+      password: "password",
+      priority: 0
+    )
+    DownloadClient.create!(
+      name: "Other Indexer",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      username: "admin",
+      password: "password",
+      priority: 10,
+      preferred_indexers: "IPTorrents"
+    )
+
+    VCR.turned_off do
+      stub_qbittorrent_connection("http://localhost:8080")
+      stub_qbittorrent_connection("http://localhost:9090")
+
+      search_result = Minitest::Mock.new
+      search_result.expect :usenet?, false
+      search_result.expect :indexer, "MyAnonaMouse"
+
+      selected = DownloadClientSelector.for_download(search_result)
+      assert_equal priority_client, selected
+    end
+  end
+
+  test "falls back to priority when indexer-matched client fails connection" do
+    DownloadClient.create!(
+      name: "Failing Matched",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      username: "admin",
+      password: "password",
+      priority: 10,
+      preferred_indexers: "MyAnonaMouse"
+    )
+    working = DownloadClient.create!(
+      name: "Working",
+      client_type: "qbittorrent",
+      url: "http://localhost:9090",
+      username: "admin",
+      password: "password",
+      priority: 0
+    )
+
+    VCR.turned_off do
+      stub_request(:post, "http://localhost:8080/api/v2/auth/login")
+        .to_return(status: 401, body: "Fails.")
+      stub_qbittorrent_connection("http://localhost:9090")
+
+      search_result = Minitest::Mock.new
+      search_result.expect :usenet?, false
+      search_result.expect :indexer, "MyAnonaMouse"
+
+      selected = DownloadClientSelector.for_download(search_result)
+      assert_equal working, selected
+    end
+  end
+
+  test "indexer preference matching is case insensitive" do
+    client = DownloadClient.create!(
+      name: "Case Test",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      username: "admin",
+      password: "password",
+      priority: 0,
+      preferred_indexers: "myanonymouse"
+    )
+
+    VCR.turned_off do
+      stub_qbittorrent_connection("http://localhost:8080")
+
+      search_result = Minitest::Mock.new
+      search_result.expect :usenet?, false
+      search_result.expect :indexer, "MyAnonaMouse"
+
+      selected = DownloadClientSelector.for_download(search_result)
+      assert_equal client, selected
+    end
+  end
+
+  test "skips indexer preference when search result has nil indexer" do
+    client = DownloadClient.create!(
+      name: "Priority Client",
+      client_type: "qbittorrent",
+      url: "http://localhost:8080",
+      username: "admin",
+      password: "password",
+      priority: 0,
+      preferred_indexers: "MyAnonaMouse"
+    )
+
+    VCR.turned_off do
+      stub_qbittorrent_connection("http://localhost:8080")
+
+      search_result = Minitest::Mock.new
+      search_result.expect :usenet?, false
+      search_result.expect :indexer, nil
+
+      selected = DownloadClientSelector.for_download(search_result)
+      assert_equal client, selected
+    end
   end
 
   private

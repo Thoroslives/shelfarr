@@ -78,6 +78,17 @@
     <p class="mt-1 text-sm text-gray-500">Container path where completed downloads appear (e.g., /downloads). Leave blank to use global settings.</p>
   </div>
 
+  <div class="my-5" data-controller="indexer-preference"
+       data-indexer-preference-url-value="<%= available_indexers_admin_download_clients_path %>"
+       data-indexer-preference-current-value="<%= download_client.preferred_indexers %>">
+    <%= form.label :preferred_indexers, "Indexer Preference", class: "block text-gray-300 font-medium" %>
+    <%= form.hidden_field :preferred_indexers, data: { indexer_preference_target: "input" } %>
+    <div data-indexer-preference-target="container" class="mt-2">
+      <p class="text-sm text-gray-500">Loading indexers...</p>
+    </div>
+    <p class="mt-1 text-sm text-gray-500">Optional. Downloads from selected indexers will prefer this client over the default priority order. Assign each indexer to only one client.</p>
+  </div>
+
   <div id="qbittorrent_fields" class="<%= 'hidden' unless download_client.qbittorrent? || download_client.new_record? %>">
     <div class="grid gap-5 md:grid-cols-2">
       <div>
