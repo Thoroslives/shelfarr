@@ -74,6 +74,11 @@ module Admin
       redirect_to admin_download_clients_path
     end
 
+    def available_indexers
+      names = fetch_indexer_names
+      render json: names
+    end
+
     private
 
     def set_download_client
@@ -83,7 +88,7 @@ module Admin
     def download_client_params
       params.require(:download_client).permit(
         :name, :client_type, :url, :username, :password, :api_key, :category, :download_path, :enabled,
-        :torrent_verification_max_attempts, :torrent_verification_wait_time
+        :torrent_verification_max_attempts, :torrent_verification_wait_time, :preferred_indexers
       )
     end
 
@@ -110,6 +115,20 @@ module Admin
       HealthCheckJob.perform_now(service: "download_client")
     rescue => e
       Rails.logger.warn "[DownloadClientsController] Failed to run download client health check: #{e.message}"
+    end
+
+    def fetch_indexer_names
+      return [] unless IndexerClient.configured?
+
+      provider = IndexerClient.current
+      if provider.respond_to?(:indexers)
+        provider.indexers.map { |i| i["name"] }.compact.sort
+      else
+        []
+      end
+    rescue StandardError => e
+      Rails.logger.warn "[DownloadClientsController] Failed to fetch indexer names: #{e.message}"
+      []
     end
 
     def sync_download_monitor

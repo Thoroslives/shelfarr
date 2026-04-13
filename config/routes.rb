@@ -84,6 +84,9 @@ Rails.application.routes.draw do
         post :move_up
         post :move_down
       end
+      collection do
+        get :available_indexers
+      end
     end
     resources :settings, only: [ :index, :update ] do
       collection do

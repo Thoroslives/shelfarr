@@ -42,7 +42,14 @@ class DownloadClientSelector
       raise NoClientAvailableError, "No #{download_type} download client configured"
     end
 
-    # Try each client in priority order until one succeeds connection test
+    # Prefer clients with matching indexer preference
+    indexer_name = @search_result.indexer
+    if indexer_name.present?
+      preferred = available_clients.select { |c| c.preferred_for_indexer?(indexer_name) }
+      preferred.each { |client| return client if client.test_connection }
+    end
+
+    # Fall back to priority order
     available_clients.each do |client|
       return client if client.test_connection
     end
