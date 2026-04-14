@@ -14,7 +14,7 @@ module Admin
 
       validate_path_template!(key, value)
       SettingsService.set(key, value)
-      handle_settings_side_effects([key.to_s])
+      handle_settings_side_effects([ key.to_s ])
 
       respond_to do |format|
         format.html { redirect_to admin_settings_path, notice: "Setting updated." }
@@ -289,6 +289,7 @@ module Admin
     end
 
     PATH_TEMPLATE_SETTINGS = %w[audiobook_path_template ebook_path_template].freeze
+    FILENAME_TEMPLATE_SETTINGS = %w[audiobook_filename_template ebook_filename_template].freeze
 
     def validate_path_template!(key, value)
       error = validate_path_template(key, value)
@@ -296,9 +297,16 @@ module Admin
     end
 
     def validate_path_template(key, value)
-      return nil unless PATH_TEMPLATE_SETTINGS.include?(key.to_s)
+      mode =
+        if PATH_TEMPLATE_SETTINGS.include?(key.to_s)
+          :path
+        elsif FILENAME_TEMPLATE_SETTINGS.include?(key.to_s)
+          :filename
+        end
 
-      valid, error = PathTemplateService.validate_template(value)
+      return nil unless mode
+
+      valid, error = PathTemplateService.validate_template(value, mode: mode)
       valid ? nil : error
     end
 
